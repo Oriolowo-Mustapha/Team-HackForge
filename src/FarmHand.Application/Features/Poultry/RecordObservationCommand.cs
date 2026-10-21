@@ -7,7 +7,8 @@ using MediatR;
 namespace FarmHand.Application.Features.Poultry;
 
 /// <summary>Records a poultry observation from free text, optionally with an image.</summary>
-/// <param name="FlockId">Flock id.</param>
+/// <param name="LivestockAnimalId">Animal id for animal-level observations (optional for flock-level).</param>
+/// <param name="LivestockCategoryId">Category id for flock-level observations.</param>
 /// <param name="RawText">Farmer's raw text; sent to Gemini with Groq fallback.</param>
 /// <param name="IdempotencyKey">Client key; reusing a key returns the existing observation.</param>
 /// <param name="ImageUrl">Optional image URL that triggers vision analysis.</param>

@@ -6,6 +6,7 @@ namespace FarmHand.Application.Features.Goats;
 
 /// <summary>Creates a livestock record. The handler adds it to the EF context but does not call SaveChanges.</summary>
 /// <param name="FarmId">Owning farm id.</param>
+/// <param name="CategoryId">Livestock category id (e.g. Poultry, Goats).</param>
 /// <param name="Species">Species, for example "goat".</param>
 /// <param name="AnimalName">Animal name or tag.</param>
 /// <param name="Sex">Sex of the animal.</param>

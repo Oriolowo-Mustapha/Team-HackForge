@@ -135,7 +135,6 @@ if (app.Environment.IsDevelopment())
         options.DisplayRequestDuration();
         options.EnableDeepLinking();
         options.EnableFilter();
-        options.PersistAuthorization = true;
     });
 }
 
