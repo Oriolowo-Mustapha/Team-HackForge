@@ -12,5 +12,10 @@ public class FlockConfiguration : IEntityTypeConfiguration<Flock>
         builder.Property(x => x.FlockName).IsRequired().HasMaxLength(100);
         builder.Property(x => x.BirdType).IsRequired().HasMaxLength(50);
         builder.HasIndex(x => x.FarmId);
+
+        builder.HasOne<Farm>()
+            .WithMany()
+            .HasForeignKey(x => x.FarmId)
+            .OnDelete(DeleteBehavior.Cascade);
     }
 }

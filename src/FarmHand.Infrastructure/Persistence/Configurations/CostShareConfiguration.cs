@@ -16,5 +16,10 @@ public class CostShareConfiguration : IEntityTypeConfiguration<CostShare>
             mc.Property(c => c.Currency).HasColumnName("AmountCurrency").HasMaxLength(10);
         });
         builder.HasIndex(x => x.VetRequestId);
+
+        builder.HasOne<VetRequest>()
+            .WithMany()
+            .HasForeignKey(x => x.VetRequestId)
+            .OnDelete(DeleteBehavior.Cascade);
     }
 }

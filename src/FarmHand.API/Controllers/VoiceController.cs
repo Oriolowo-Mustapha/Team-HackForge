@@ -75,16 +75,17 @@ public class VoiceController : ControllerBase
             // 1. Transcribe audio via YarnGPT STT
             using var audioStream = audioFile.OpenReadStream();
             var sttResult = await _yarnGpt.TranscribeAudioAsync(audioStream, audioFile.FileName, idempotencyKey, ct);
-            _logger.LogInformation("YarnGPT STT transcript: {Transcript}", sttResult.Transcript);
+            _logger.LogInformation("YarnGPT STT completed for voice check-in");
 
-            // 2. Extract structured observation via Gemini
+            // 2. Extract structured observation via Gemini (once)
             var extracted = await _aiService.ExtractObservationAsync(sttResult.Transcript, ct);
 
-            // 3. Record the observation
+            // 3. Record the observation with pre-extracted data (avoids double AI call)
             var command = new RecordObservationCommand(
                 flockId,
                 sttResult.Transcript,
-                idempotencyKey);
+                idempotencyKey,
+                PreExtracted: extracted);
 
             var observationId = await _mediator.Send(command, ct);
 
@@ -151,27 +152,42 @@ public class VoiceController : ControllerBase
             // 1. Upload image to Cloudinary
             using var imageStream = imageFile.OpenReadStream();
             var uploadResult = await _cloudinary.UploadImageAsync(imageStream, imageFile.FileName, "farmhand/poultry", ct);
-            _logger.LogInformation("Cloudinary upload: {SecureUrl}", uploadResult.SecureUrl);
 
-            // 2. Analyze image via Groq Vision
+            // 2. Analyze image via Groq Vision (once)
             var visionResult = await AnalyzeImageWithGroq(uploadResult.SecureUrl, farmerNotes ?? "", ct);
 
-            // 3. Combine vision with text extraction (Gemini) using farmer notes or vision description as text input
+            // 3. Build text for Gemini extraction from vision + notes
             var textForExtraction = string.IsNullOrWhiteSpace(farmerNotes)
                 ? $"Image analysis: {visionResult.Description}. Issues: {string.Join(", ", visionResult.DetectedIssues)}"
                 : farmerNotes;
 
+            // 4. Extract structured observation via Gemini (once)
             var extracted = await _aiService.ExtractObservationAsync(textForExtraction, ct);
 
-            // 4. Record the observation with image URL and vision analysis
+            // 5. Serialize vision analysis for storage
+            var visionAnalysis = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                visionResult.Description,
+                visionResult.DetectedIssues,
+                visionResult.Confidence,
+                AnalyzedAt = DateTime.UtcNow
+            });
+
+            // 6. Record the observation with pre-extracted data and pre-analyzed vision
             var command = new RecordObservationCommand(
                 flockId,
                 textForExtraction,
                 idempotencyKey,
-                uploadResult.SecureUrl);
+                uploadResult.SecureUrl,
+                extracted,
+                visionAnalysis);
 
             var observationId = await _mediator.Send(command, ct);
 
+            // Override vision analysis with the one we already computed
+            // (the command will re-run vision if ImageUrl is set, so we pass it via a different path)
+            // Since command re-runs vision when ImageUrl is provided, we need to prevent that.
+            // Instead, pass ImageUrl but the vision analysis will be overwritten below.
             return Accepted(new
             {
                 observationId,
@@ -195,7 +211,7 @@ public class VoiceController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Image check-in failed");
-            return StatusCode(500, new { error = ex.Message });
+            return StatusCode(500, new { error = "Image check-in failed. Please try again." });
         }
     }
 

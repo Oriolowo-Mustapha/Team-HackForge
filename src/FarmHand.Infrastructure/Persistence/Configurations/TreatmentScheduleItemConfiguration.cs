@@ -11,5 +11,10 @@ public class TreatmentScheduleItemConfiguration : IEntityTypeConfiguration<Treat
         builder.HasKey(x => x.Id);
         builder.Property(x => x.Action).IsRequired().HasMaxLength(200);
         builder.HasIndex(x => x.TreatmentPlanId);
+
+        builder.HasOne<TreatmentPlan>()
+            .WithMany()
+            .HasForeignKey(x => x.TreatmentPlanId)
+            .OnDelete(DeleteBehavior.Cascade);
     }
 }

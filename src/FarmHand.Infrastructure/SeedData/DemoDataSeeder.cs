@@ -1,10 +1,11 @@
-using FarmHand.Domain.Entities;
-using FarmHand.Domain.Enums;
-using FarmHand.Infrastructure.Persistence;
-
 namespace FarmHand.Infrastructure.SeedData;
 
-public class DemoDataSeeder
+public interface IDemoDataSeeder
+{
+    Task SeedAsync();
+}
+
+public class DemoDataSeeder : IDemoDataSeeder
 {
     private readonly FarmHandDbContext _dbContext;
 
@@ -26,14 +27,13 @@ public class DemoDataSeeder
         var flock = new Flock(farmId, "Layers Flock A", "Laying Birds", 500);
         flock.GetType().GetProperty("Id")!.SetValue(flock, flockId);
 
-        // Seed 7 days of observation history (avg 2 deaths/day)
         var observations = new List<PoultryObservation>();
         for (int i = 7; i >= 1; i--)
         {
             var obs = new PoultryObservation(
                 flockId,
                 DateTime.UtcNow.AddDays(-i),
-                2, // average mortality
+                2,
                 "normal",
                 "normal",
                 "10 crates",

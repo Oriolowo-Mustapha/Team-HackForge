@@ -13,5 +13,10 @@ public class IncidentActionConfiguration : IEntityTypeConfiguration<IncidentActi
         builder.Property(x => x.Priority).HasMaxLength(50);
         builder.Property(x => x.Status).HasMaxLength(50);
         builder.HasIndex(x => x.IncidentId);
+
+        builder.HasOne<Incident>()
+            .WithMany()
+            .HasForeignKey(x => x.IncidentId)
+            .OnDelete(DeleteBehavior.Cascade);
     }
 }

@@ -14,5 +14,10 @@ public class LivestockRecordConfiguration : IEntityTypeConfiguration<LivestockRe
         builder.Property(x => x.Sex).HasMaxLength(10);
         builder.Property(x => x.Notes).HasMaxLength(500);
         builder.HasIndex(x => x.FarmId);
+
+        builder.HasOne<Farm>()
+            .WithMany()
+            .HasForeignKey(x => x.FarmId)
+            .OnDelete(DeleteBehavior.Cascade);
     }
 }

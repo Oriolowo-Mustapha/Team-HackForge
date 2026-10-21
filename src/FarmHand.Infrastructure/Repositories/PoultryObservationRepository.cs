@@ -24,4 +24,14 @@ public class PoultryObservationRepository : EfRepository<PoultryObservation>, IP
     {
         return await DbSet.AnyAsync(o => o.FlockId == flockId && o.RecordedAt.Date == recordedAt.Date && o.ConfirmationStatus != Domain.Enums.ObservationConfirmationStatus.Confirmed, ct);
     }
+
+    public async Task<bool> ExistsByIdempotencyKeyAsync(string idempotencyKey, CancellationToken ct = default)
+    {
+        return await DbSet.AnyAsync(o => o.IdempotencyKey == idempotencyKey, ct);
+    }
+
+    public async Task<PoultryObservation?> GetByIdempotencyKeyAsync(string idempotencyKey, CancellationToken ct = default)
+    {
+        return await DbSet.FirstOrDefaultAsync(o => o.IdempotencyKey == idempotencyKey, ct);
+    }
 }

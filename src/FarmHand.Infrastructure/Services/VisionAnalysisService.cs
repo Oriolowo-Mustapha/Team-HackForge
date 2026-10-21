@@ -7,11 +7,11 @@ namespace FarmHand.Infrastructure.Services;
 
 public class VisionAnalysisService : IVisionAnalysisService
 {
-    private readonly GroqVisionService _groqVision;
+    private readonly IGroqVisionService _groqVision;
     private readonly ILogger<VisionAnalysisService> _logger;
 
     public VisionAnalysisService(
-        GroqVisionService groqVision,
+        IGroqVisionService groqVision,
         ILogger<VisionAnalysisService> logger)
     {
         _groqVision = groqVision;

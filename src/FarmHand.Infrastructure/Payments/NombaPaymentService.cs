@@ -37,10 +37,46 @@ public class NombaPaymentService : IPaymentService
 
     public async Task<PaymentResult> VerifyPaymentAsync(string transactionReference, CancellationToken ct = default)
     {
-        // Sandbox mode: simulate payment verification
-        _logger.LogInformation("Nomba sandbox: verifying payment {TransactionReference}", transactionReference);
-        await Task.Delay(100, ct);
+        // Verify with Nomba sandbox before marking as paid
+        if (string.IsNullOrWhiteSpace(_apiKey))
+        {
+            _logger.LogWarning("Nomba API key not configured - payment verification skipped");
+            return new PaymentResult(false, null, "Payment provider not configured");
+        }
 
-        return new PaymentResult(true, transactionReference, null);
+        try
+        {
+            var verifyUrl = $"{_baseUrl}/api/v1/payments/verify";
+            using var request = new HttpRequestMessage(HttpMethod.Post, verifyUrl);
+            request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _apiKey);
+            request.Content = new StringContent(
+                JsonSerializer.Serialize(new { reference = transactionReference }),
+                Encoding.UTF8,
+                "application/json");
+
+            var response = await _httpClient.SendAsync(request, ct);
+            var responseBody = await response.Content.ReadAsStringAsync(ct);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("Nomba verification failed: {StatusCode} {Body}", response.StatusCode, responseBody);
+                return new PaymentResult(false, null, "Payment verification failed");
+            }
+
+            using var doc = JsonDocument.Parse(responseBody);
+            var root = doc.RootElement;
+
+            var status = root.TryGetProperty("status", out var statusEl) ? statusEl.GetString() ?? "" : "";
+            var isPaid = string.Equals(status, "paid", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(status, "success", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(status, "completed", StringComparison.OrdinalIgnoreCase);
+
+            return new PaymentResult(isPaid, transactionReference, isPaid ? null : "Payment not completed");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Nomba verification error");
+            return new PaymentResult(false, null, "Payment verification error");
+        }
     }
 }
