@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/FarmHand.API/FarmHand.API.csproj" />
+    <Project Path="src/FarmHand.Application/FarmHand.Application.csproj" />
+    <Project Path="src/FarmHand.Domain/FarmHand.Domain.csproj" />
+    <Project Path="src/FarmHand.Infrastructure/FarmHand.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/FarmHand.IntegrationTests/FarmHand.IntegrationTests.csproj" />
+    <Project Path="tests/FarmHand.UnitTests/FarmHand.UnitTests.csproj" />
+  </Folder>
+</Solution>

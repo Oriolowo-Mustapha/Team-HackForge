@@ -1,0 +1,12 @@
+bin/
+obj/
+.idea/
+.vs/
+*.user
+*.suo
+appsettings.Development.json
+*.log
+.env
+node_modules/
+frontend/.next/
+publish/

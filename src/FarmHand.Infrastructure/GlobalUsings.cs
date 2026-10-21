@@ -1,0 +1,15 @@
+global using FarmHand.Domain;
+global using FarmHand.Domain.Entities;
+global using FarmHand.Domain.Enums;
+global using FarmHand.Domain.Interfaces;
+global using FarmHand.Application.Common.Interfaces;
+global using FarmHand.Infrastructure.Persistence;
+global using FarmHand.Infrastructure.Repositories;
+global using FarmHand.Infrastructure.AI.Clients;
+global using FarmHand.Infrastructure.AI.Services;
+global using FarmHand.Infrastructure.Payments;
+global using FarmHand.Infrastructure.Services;
+global using MediatR;
+global using Microsoft.EntityFrameworkCore;
+global using Microsoft.Extensions.Configuration;
+global using Microsoft.Extensions.Logging;

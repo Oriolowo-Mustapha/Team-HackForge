@@ -1,0 +1,9 @@
+global using FarmHand.Domain;
+global using FarmHand.Domain.Entities;
+global using FarmHand.Domain.Enums;
+global using FarmHand.Domain.Interfaces;
+global using FarmHand.Application.Common.DTOs;
+global using FarmHand.Application.Common.Interfaces;
+global using MediatR;
+global using FluentValidation;
+global using Microsoft.Extensions.Logging;
