@@ -37,9 +37,7 @@
 # 1. Create local configuration
 Copy-Item src/FarmHand.API/appsettings.example.json src/FarmHand.API/appsettings.json
 
-# 2. Fill in your keys, then apply the database migration (PostgreSQL must be running)
-dotnet ef database update --project src/FarmHand.Infrastructure --startup-project src/FarmHand.API
-
+# 2. Fill in your keys. PostgreSQL must be running; migrations apply on startup.
 # 3. Run the API
 dotnet run --project src/FarmHand.API --launch-profile https
 ```
@@ -50,13 +48,13 @@ dotnet run --project src/FarmHand.API --launch-profile https
 | OpenAPI JSON | `https://localhost:7215/swagger/v1/swagger.json` |
 | Health check | `https://localhost:7215/health` |
 
-> The repository currently targets `net10.0`. Install the .NET 10 SDK or retarget the solution before running. See `CODE_AUDIT.md` for the full list of blockers.
+> The repository targets `net9.0` and pins SDK `9.0.308` with `rollForward: latestMajor` in `global.json`. `Jwt:SecretKey` is required at startup; the app fails fast if it is missing.
 
 ---
 
 ## Authentication
 
-All controllers are decorated with `[Authorize]`. Only `GET /health` is anonymous.
+All controllers are decorated with `[Authorize]`. `GET /health` and `POST /api/auth/login` are anonymous.
 
 ```
 Authorization: Bearer <jwt>
@@ -66,7 +64,24 @@ Tokens must be signed with HS256 using the configured `Jwt:SecretKey`, and must 
 
 **In Swagger UI:** click **Authorize**, paste the raw token (Swagger adds the `Bearer ` prefix).
 
-> **Gap:** there is no login or token-issuance endpoint yet. `IJwtService.GenerateToken` exists but is not exposed by any route, so the documented endpoints cannot be exercised against a real token until an auth endpoint is added. Do not use the fallback key committed in source; see `CODE_AUDIT.md` C4–C5.
+### Obtain a token (demo)
+
+`POST /api/auth/login` — anonymous.
+
+```json
+{ "email": "farmer@example.com", "password": "anything" }
+```
+
+Response `200 OK`:
+
+```json
+{
+  "token": "eyJhbGciOiJIUzI1NiIs...",
+  "expiresAt": "2026-10-28T14:05:00Z"
+}
+```
+
+> **Gap:** the login endpoint does not validate credentials. It issues a `Farmer` token for any non-empty email/password pair. Use it only for local testing until a user store and password verification exist. See `CODE_AUDIT.md`.
 
 | Condition | Response |
 |---|---|
@@ -74,6 +89,7 @@ Tokens must be signed with HS256 using the configured `Jwt:SecretKey`, and must 
 | Invalid signature, wrong issuer/audience | `401 Unauthorized` |
 | Expired token | `401 Unauthorized` |
 | Valid token, insufficient ownership/role | No checks exist yet — any authenticated caller is allowed |
+| `Jwt:SecretKey` missing at startup | App fails to start |
 
 ---
 
@@ -166,7 +182,9 @@ Enums are numeric on the wire. The tables below map number → name.
 | POST | `/api/vetcoordination/vet-requests/{vetRequestId}/respond` | Vet responds | 200 |
 | POST | `/api/vetcoordination/vet-requests/{vetRequestId}/cost-share` | Record cost share | 200 |
 | GET | `/api/vetcoordination/incidents/{incidentId}/prevention-plan` | Get prevention plan | 200 |
-| POST | `/api/payments` | Record a payment | 200 |
+| POST | `/api/auth/login` | Issue a demo JWT (anonymous) | 200 |
+| POST | `/api/payments/initiate` | Initiate payment, get reference | 200 |
+| POST | `/api/payments/record` | Verify and record payment | 200 |
 | POST | `/api/goats/records` | Create livestock record | 201 |
 | GET | `/api/goats/records` | List livestock records | 200 |
 | GET | `/health` | Health check (anonymous) | 200 |
@@ -354,7 +372,7 @@ Request body (`UpdateIncidentStatusCommand`):
 
 Response `200 OK` with an empty body.
 
-> Because no exception middleware is configured, a failed `Acknowledge()` precondition and a missing incident currently surface as `500`, not `409`/`404`.
+> A failed `Acknowledge()` precondition or a missing incident surfaces as `500` through the global exception handler, not `409`/`404`.
 
 ---
 
@@ -379,7 +397,7 @@ Request body (`RecordObservationCommand`):
 |---|---|---|---|
 | `flockId` | uuid | yes | must not be empty |
 | `rawText` | string | yes | non-empty, max 2000 |
-| `idempotencyKey` | string | yes | non-empty; **not persisted or enforced** |
+| `idempotencyKey` | string | yes | non-empty; replaying a key returns the existing observation id |
 | `imageUrl` | string? | no | if supplied, triggers vision analysis |
 
 The server calls Gemini first, falling back to Groq, and stores the extracted observation with status `Pending`.
@@ -390,7 +408,7 @@ Response `202 Accepted`:
 { "id": "9b7e6d5c-4a3b-2c1d-0e9f-8a7b6c5d4e3f" }
 ```
 
-> The optional pre-extracted fields in the response of the voice endpoints are computed separately; the command re-runs extraction. Expect duplicate provider calls and possible mismatch.
+> The optional pre-extracted fields accepted by the command are not yet supplied by the voice endpoints, so extraction can still run twice for those flows.
 
 ### Confirm observation
 
@@ -484,7 +502,7 @@ Response `202 Accepted`:
 }
 ```
 
-> **Known blockers:** Cloudinary uploads are unsigned and will be rejected; the command path also fails DI because `VisionAnalysisService` depends on an unregistered concrete `GroqVisionService`. See `CODE_AUDIT.md` C3/H3.
+> Uploads are now signed with `Cloudinary:ApiSecret`; the request fails if the secret is missing. Vision analysis resolves through `IVisionAnalysisService`.
 
 ### Text to speech
 
@@ -588,15 +606,15 @@ Response `404 Not Found` when no plan exists.
 
 ## Payments
 
-### Record payment
+### Initiate payment
 
-`POST /api/payments`
+`POST /api/payments/initiate`
 
 ```json
 {
   "vetRequestId": "d3f1a2b4-5c6d-7e8f-9a0b-1c2d3e4f5a6b",
   "amount": 2500,
-  "transactionReference": "NOMBA_d3f1a2b4_20261021140500"
+  "currency": "NGN"
 }
 ```
 
@@ -604,11 +622,39 @@ Response `404 Not Found` when no plan exists.
 |---|---|---|---|
 | `vetRequestId` | uuid | yes | must not be empty |
 | `amount` | decimal | yes | > 0 |
-| `transactionReference` | string | yes | non-empty, not unique |
+| `currency` | string | yes | e.g. `NGN` |
 
-Response `200 OK`, empty body.
+Response `200 OK`:
 
-> The payment is marked `Completed` without contacting the payment provider. There is no idempotency and no duplicate-reference detection. See `CODE_AUDIT.md` C7.
+```json
+{ "transactionReference": "NOMBA_d3f1a2b45c6d7e8f9a0b1c2d3e4f5a6b_20261021140500" }
+```
+
+Response `400 Bad Request` — `{ "error": "<provider message>" }`.
+
+> Initiation is simulated by the sandbox `NombaPaymentService`; it returns a generated reference without calling Nomba and succeeds even when no API key is configured.
+
+### Verify and record payment
+
+`POST /api/payments/record`
+
+```json
+{
+  "vetRequestId": "d3f1a2b4-5c6d-7e8f-9a0b-1c2d3e4f5a6b",
+  "amount": 2500,
+  "transactionReference": "NOMBA_d3f1a2b45c6d7e8f9a0b1c2d3e4f5a6b_20261021140500"
+}
+```
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `vetRequestId` | uuid | yes | must not be empty |
+| `amount` | decimal | yes | > 0 |
+| `transactionReference` | string | yes | verified with the provider before recording |
+
+Response `200 OK`: `{ "status": "paid" }`
+
+The handler calls `IPaymentService.VerifyPaymentAsync` first. If `Nomba:ApiKey` is missing or the reference is not `paid`/`success`/`completed`, it throws and the global exception handler returns `500` with a generic problem+json body.
 
 ---
 
@@ -630,7 +676,7 @@ Response `200 OK`, empty body.
 
 Response `201 Created`: `{ "id": "..." }`
 
-> **Known bug:** the handler never persists the record. The id is not retrievable.
+> **Known bug:** the handler adds the record to the EF context but never calls `SaveChanges`, so the row is not committed and the id is not retrievable. `GET` remains a placeholder.
 
 ### List livestock records
 
@@ -724,32 +770,28 @@ Response `200 OK`:
 
 ## Error handling
 
-The API does not yet implement a uniform error contract. Current behavior:
+A global exception handler returns a generic RFC 7807 response for unhandled exceptions:
+
+```json
+{
+  "type": "https://farmhand.ai/problems/server-error",
+  "title": "An error occurred while processing your request.",
+  "status": 500,
+  "detail": "Please check the server logs for more information."
+}
+```
 
 | Situation | Status | Body |
 |---|---|---|
 | Model binding failure | 400 | ASP.NET Core `ValidationProblemDetails` |
-| FluentValidation failure | **500** | Raw exception (via exception middleware absent) |
-| Entity not found (`KeyNotFoundException`) | **500** | Raw exception |
+| FluentValidation failure | **500** | Generic problem+json |
+| Entity not found (`KeyNotFoundException`) | **500** | Generic problem+json |
 | Controller-level mismatch (`400 BadRequest`) | 400 | Empty body |
 | Missing/invalid token | 401 | Empty body |
 | Unknown route | 404 | Empty body |
-| Unhandled/third-party failure | 500 | `{ "error": "<exception message>" }` on voice endpoints |
+| Voice endpoint failures | 500 | `{ "error": "<exception message>" }` (bypasses the global handler) |
 
-**Intended contract (to implement):** RFC 7807 `application/problem+json`:
-
-```json
-{
-  "type": "https://farmhand.app/errors/validation",
-  "title": "Validation failed",
-  "status": 400,
-  "detail": "FlockId must not be empty.",
-  "instance": "/api/poultry/observations",
-  "errors": {
-    "FlockId": ["FlockId must not be empty."]
-  }
-}
-```
+Validation and not-found failures still return `500`; the handler hides the exception but does not map it to `400`/`404`.
 
 ---
 
@@ -767,15 +809,14 @@ Routes are currently unversioned (`/api/<resource>`). Recommended migration:
 
 These affect the accuracy and usefulness of the API contract:
 
-- No token-issuance endpoint; every `[Authorize]` route is unreachable for real clients.
+- `/api/auth/login` issues a token for any email/password; there is no user store, password check, refresh, or revocation.
 - No ownership or role checks; any authenticated caller can access any farm and act as a vet.
 - Validation and not-found errors return 500 instead of 400/404.
-- `idempotencyKey` is accepted but never stored or enforced.
-- `POST /api/goats/records` returns an id without persisting anything.
-- Payments are marked completed without provider verification; references are not unique.
-- Cloudinary uploads are unsigned and will fail; image check-in also hits a DI resolution failure.
+- `POST /api/goats/records` adds the entity but never calls `SaveChanges`, so nothing is committed.
+- Payments: initiation is simulated; recording requires `Nomba:ApiKey`. Duplicate references are not rejected and recording is not idempotent.
+- Voice endpoints return raw exception messages and create an `HttpClient` per request.
+- No pagination, filtering, rate limiting, CORS policy, or upload size limits.
 - Enums are numeric on the wire; there is no string-enum conversion.
-- No pagination, filtering, rate limiting, CORS policy, or request-size limits.
 - Response `example` values in this document are illustrative, not fixtures.
 
 For the full code review, see [`CODE_AUDIT.md`](./CODE_AUDIT.md).

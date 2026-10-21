@@ -4,7 +4,7 @@ using MediatR;
 
 namespace FarmHand.Application.Features.Goats;
 
-/// <summary>Creates a livestock record. The current handler does not persist it.</summary>
+/// <summary>Creates a livestock record. The handler adds it to the EF context but does not call SaveChanges.</summary>
 /// <param name="FarmId">Owning farm id.</param>
 /// <param name="Species">Species, for example "goat".</param>
 /// <param name="AnimalName">Animal name or tag.</param>
