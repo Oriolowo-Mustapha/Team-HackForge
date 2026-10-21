@@ -4,6 +4,10 @@ using MediatR;
 
 namespace FarmHand.Application.Features.VetCoordination;
 
+/// <summary>Records a cost-share contribution for a vet request.</summary>
+/// <param name="VetRequestId">Vet request id; must match the route value.</param>
+/// <param name="PayerType">Free-text payer category, for example "farmer", "coop", or "insurer".</param>
+/// <param name="Amount">Amount in NGN; must be zero or greater.</param>
 public record RecordCostShareCommand(
     Guid VetRequestId,
     string PayerType,

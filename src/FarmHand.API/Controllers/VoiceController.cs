@@ -9,9 +9,11 @@ using System.Text;
 
 namespace FarmHand.API.Controllers;
 
+/// <summary>Voice and image check-ins powered by YarnGPT, Gemini, and Groq.</summary>
 [ApiController]
 [Route("api/[controller]")]
 [Authorize]
+[Produces("application/json")]
 public class VoiceController : ControllerBase
 {
     private readonly IMediator _mediator;
@@ -37,7 +39,25 @@ public class VoiceController : ControllerBase
     /// <summary>
     /// Voice check-in: uploads audio, transcribes via YarnGPT STT, extracts structured observation via Gemini.
     /// </summary>
+    /// <remarks>
+    /// Send multipart/form-data with the audio in <c>audioFile</c>; pass <c>flockId</c> and
+    /// <c>idempotencyKey</c> as query-string parameters. The idempotency key is not yet
+    /// used for de-duplication.
+    /// </remarks>
+    /// <param name="audioFile">Audio recording (webm/mp3/wav).</param>
+    /// <param name="flockId">Flock the observation belongs to.</param>
+    /// <param name="idempotencyKey">Client-generated key for retry safety.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <response code="202">Observation created from the transcript.</response>
+    /// <response code="400">Missing audio file or idempotency key.</response>
+    /// <response code="401">Missing or invalid bearer token.</response>
+    /// <response code="500">STT, AI extraction, or persistence failed.</response>
     [HttpPost("check-in")]
+    [Consumes("multipart/form-data")]
+    [ProducesResponseType(StatusCodes.Status202Accepted)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
     public async Task<IActionResult> VoiceCheckIn(
         IFormFile? audioFile,
         Guid flockId,
@@ -96,7 +116,26 @@ public class VoiceController : ControllerBase
     /// <summary>
     /// Image check-in: uploads image to Cloudinary, analyzes via Groq Vision, extracts via Gemini.
     /// </summary>
+    /// <remarks>
+    /// Send multipart/form-data with the image in <c>imageFile</c>; pass <c>flockId</c>,
+    /// <c>idempotencyKey</c>, and optional <c>farmerNotes</c> as query-string parameters.
+    /// Cloudinary uploads are currently unsigned and will be rejected until request signing is added.
+    /// </remarks>
+    /// <param name="imageFile">Image of the flock or environment.</param>
+    /// <param name="flockId">Flock the observation belongs to.</param>
+    /// <param name="idempotencyKey">Client-generated key for retry safety.</param>
+    /// <param name="farmerNotes">Optional notes to combine with vision output.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <response code="202">Observation created from the image analysis.</response>
+    /// <response code="400">Missing image file or idempotency key.</response>
+    /// <response code="401">Missing or invalid bearer token.</response>
+    /// <response code="500">Upload, vision analysis, AI extraction, or persistence failed.</response>
     [HttpPost("image-check-in")]
+    [Consumes("multipart/form-data")]
+    [ProducesResponseType(StatusCodes.Status202Accepted)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
     public async Task<IActionResult> ImageCheckIn(
         IFormFile imageFile,
         Guid flockId,
@@ -263,7 +302,17 @@ messages = new object[]
     /// <summary>
     /// Voice response: converts vet instructions text to audio via YarnGPT TTS (Pidgin/Yoruba support).
     /// </summary>
+    /// <param name="request">Text to speak, optional voice, and optional target language.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <response code="200">Synthesized audio URL and credits charged.</response>
+    /// <response code="400">Request body missing or invalid.</response>
+    /// <response code="401">Missing or invalid bearer token.</response>
+    /// <response code="500">TTS synthesis failed.</response>
     [HttpPost("respond")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
     public async Task<IActionResult> VoiceRespond(
         [FromBody] VoiceRespondRequest request,
         CancellationToken ct)
@@ -290,7 +339,15 @@ messages = new object[]
         }
     }
 
+    /// <summary>List available YarnGPT voices.</summary>
+    /// <param name="ct">Cancellation token.</param>
+    /// <response code="200">Array of voice ids.</response>
+    /// <response code="401">Missing or invalid bearer token.</response>
+    /// <response code="500">YarnGPT voice lookup failed.</response>
     [HttpGet("voices")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
     public async Task<IActionResult> GetVoices(CancellationToken ct)
     {
         try
@@ -306,4 +363,8 @@ messages = new object[]
     }
 }
 
+/// <summary>Payload for text-to-speech synthesis.</summary>
+/// <param name="Text">Text to convert to speech.</param>
+/// <param name="Voice">Optional voice id; defaults to "umar" server-side.</param>
+/// <param name="TargetLanguage">Optional target language, for example "yoruba" or "pidgin".</param>
 public record VoiceRespondRequest(string Text, string? Voice, string? TargetLanguage);

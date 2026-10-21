@@ -20,6 +20,8 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.IdentityModel.Tokens;
+using Microsoft.OpenApi.Models;
+using Swashbuckle.AspNetCore.SwaggerUI;
 using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -27,7 +29,53 @@ var builder = WebApplication.CreateBuilder(args);
 // Add services to the container.
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
+builder.Services.AddSwaggerGen(options =>
+{
+    options.SwaggerDoc("v1", new OpenApiInfo
+    {
+        Title = "FarmHand API",
+        Version = "v1",
+        Description = "Voice-first poultry and livestock health API. All endpoints except /health require a JWT bearer token.",
+        Contact = new OpenApiContact
+        {
+            Name = "Team HackForge"
+        }
+    });
+
+    options.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
+    {
+        Name = "Authorization",
+        Type = SecuritySchemeType.Http,
+        Scheme = "bearer",
+        BearerFormat = "JWT",
+        In = ParameterLocation.Header,
+        Description = "Paste the raw JWT. Swagger UI adds the \"Bearer \" prefix automatically."
+    });
+
+    options.AddSecurityRequirement(new OpenApiSecurityRequirement
+    {
+        {
+            new OpenApiSecurityScheme
+            {
+                Reference = new OpenApiReference
+                {
+                    Type = ReferenceType.SecurityScheme,
+                    Id = "Bearer"
+                }
+            },
+            Array.Empty<string>()
+        }
+    });
+
+    foreach (var xmlFile in new[] { "FarmHand.API.xml", "FarmHand.Application.xml" })
+    {
+        var xmlPath = Path.Combine(AppContext.BaseDirectory, xmlFile);
+        if (File.Exists(xmlPath))
+        {
+            options.IncludeXmlComments(xmlPath, includeControllerXmlComments: true);
+        }
+    }
+});
 
 // Application layer (MediatR, validators, behaviors)
 builder.Services.AddMediatR(typeof(CreateFarmCommandHandler).Assembly);
@@ -80,7 +128,15 @@ using (var scope = app.Services.CreateScope())
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
-    app.UseSwaggerUI();
+    app.UseSwaggerUI(options =>
+    {
+        options.SwaggerEndpoint("/swagger/v1/swagger.json", "FarmHand API v1");
+        options.DocExpansion(DocExpansion.List);
+        options.DisplayRequestDuration();
+        options.EnableDeepLinking();
+        options.EnableFilter();
+        options.PersistAuthorization = true;
+    });
 }
 
 app.UseExceptionHandler(errorApp =>

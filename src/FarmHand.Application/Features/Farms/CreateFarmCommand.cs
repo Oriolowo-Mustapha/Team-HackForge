@@ -5,6 +5,10 @@ using MediatR;
 
 namespace FarmHand.Application.Features.Farms;
 
+/// <summary>Creates a farm.</summary>
+/// <param name="OwnerId">Owner identifier. Currently trusted from the request body.</param>
+/// <param name="DisplayName">Human-readable farm name.</param>
+/// <param name="Location">Free-text location.</param>
 public record CreateFarmCommand(string OwnerId, string DisplayName, string Location) : IRequest<Guid>;
 
 public class CreateFarmCommandHandler : IRequestHandler<CreateFarmCommand, Guid>

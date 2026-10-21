@@ -6,6 +6,14 @@ using MediatR;
 
 namespace FarmHand.Application.Features.Incidents;
 
+/// <summary>Creates an incident. DetectedAt is assigned by the server.</summary>
+/// <param name="FarmId">Owning farm id.</param>
+/// <param name="FlockId">Affected flock id.</param>
+/// <param name="IncidentType">Short incident classification.</param>
+/// <param name="Severity">Severity level, sent as an integer (0-3).</param>
+/// <param name="TriggeringObservations">Evidence that triggered the incident.</param>
+/// <param name="EvidenceSummary">Summary shown to the farmer and vet.</param>
+/// <param name="RuleVersion">Optional detection rule version.</param>
 public record CreateIncidentCommand(
     Guid FarmId,
     Guid FlockId,

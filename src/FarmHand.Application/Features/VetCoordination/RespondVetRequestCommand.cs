@@ -5,6 +5,9 @@ using MediatR;
 
 namespace FarmHand.Application.Features.VetCoordination;
 
+/// <summary>Marks a vet request as responded.</summary>
+/// <param name="VetRequestId">Vet request id; must match the route value.</param>
+/// <param name="VetPartnerId">Optional responding vet partner id.</param>
 public record RespondVetRequestCommand(Guid VetRequestId, Guid? VetPartnerId = null) : IRequest;
 
 public class RespondVetRequestCommandHandler : IRequestHandler<RespondVetRequestCommand>

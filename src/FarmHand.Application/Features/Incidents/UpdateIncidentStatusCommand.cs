@@ -5,6 +5,10 @@ using MediatR;
 
 namespace FarmHand.Application.Features.Incidents;
 
+/// <summary>Transitions an incident to a new status.</summary>
+/// <param name="IncidentId">Incident id; must match the route value.</param>
+/// <param name="NewStatus">Target status, sent as an integer (1-5). Open/unknown values are ignored.</param>
+/// <param name="FollowUpDate">Optional follow-up date; defaults to now + 1 day for FollowUpRequired.</param>
 public record UpdateIncidentStatusCommand(Guid IncidentId, IncidentStatus NewStatus, DateTime? FollowUpDate = null) : IRequest;
 
 public class UpdateIncidentStatusCommandHandler : IRequestHandler<UpdateIncidentStatusCommand>
