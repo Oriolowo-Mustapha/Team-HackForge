@@ -5,6 +5,9 @@ using MediatR;
 
 namespace FarmHand.Application.Features.Poultry;
 
+/// <summary>Confirms an AI-extracted observation.</summary>
+/// <param name="ObservationId">Observation id; must match the route value.</param>
+/// <param name="CorrectedNotes">Optional corrected notes that replace the extracted farmer notes.</param>
 public record ConfirmObservationCommand(Guid ObservationId, string? CorrectedNotes) : IRequest;
 
 public class ConfirmObservationCommandHandler : IRequestHandler<ConfirmObservationCommand>

@@ -6,9 +6,11 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace FarmHand.API.Controllers;
 
+/// <summary>Farm registration and dashboard aggregation.</summary>
 [ApiController]
 [Route("api/[controller]")]
 [Authorize]
+[Produces("application/json")]
 public class FarmsController : ControllerBase
 {
     private readonly IMediator _mediator;
@@ -18,14 +20,36 @@ public class FarmsController : ControllerBase
         _mediator = mediator;
     }
 
+    /// <summary>Create a farm.</summary>
+    /// <remarks>
+    /// OwnerId is currently taken from the request body. Until it is derived from the
+    /// authenticated principal, callers can create farms for any owner.
+    /// </remarks>
+    /// <param name="command">Farm details to persist.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <response code="201">Farm created. The body contains the new farm id.</response>
+    /// <response code="400">Request validation failed.</response>
+    /// <response code="401">Missing or invalid bearer token.</response>
     [HttpPost]
+    [ProducesResponseType(StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public async Task<IActionResult> CreateFarm([FromBody] CreateFarmCommand command, CancellationToken ct)
     {
         var id = await _mediator.Send(command, ct);
         return CreatedAtAction(nameof(GetDashboard), new { farmId = id }, new { id });
     }
 
+    /// <summary>Get a farm dashboard.</summary>
+    /// <param name="farmId">Farm id.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <response code="200">Dashboard aggregated from the farm's incidents.</response>
+    /// <response code="401">Missing or invalid bearer token.</response>
+    /// <response code="404">Farm not found.</response>
     [HttpGet("{farmId}/dashboard")]
+    [ProducesResponseType(typeof(DashboardDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetDashboard(Guid farmId, CancellationToken ct)
     {
         var dashboard = await _mediator.Send(new GetDashboardQuery(farmId), ct);

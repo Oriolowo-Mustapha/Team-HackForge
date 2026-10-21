@@ -6,6 +6,10 @@ using MediatR;
 
 namespace FarmHand.Application.Features.VetCoordination;
 
+/// <summary>Creates a vet request for an incident.</summary>
+/// <param name="IncidentId">Incident id; must match the route value.</param>
+/// <param name="RequestType">Coordination model, sent as an integer (0-2).</param>
+/// <param name="FarmerCost">Farmer's share of the cost, in NGN.</param>
 public record CreateVetRequestCommand(
     Guid IncidentId,
     RequestType RequestType,

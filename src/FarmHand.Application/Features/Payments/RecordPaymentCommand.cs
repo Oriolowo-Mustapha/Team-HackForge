@@ -4,6 +4,10 @@ using MediatR;
 
 namespace FarmHand.Application.Features.Payments;
 
+/// <summary>Records a completed payment. No provider verification is performed.</summary>
+/// <param name="VetRequestId">Vet request being paid for.</param>
+/// <param name="Amount">Amount in NGN; must be greater than zero.</param>
+/// <param name="TransactionReference">Provider or client reference. Not unique, not validated.</param>
 public record RecordPaymentCommand(
     Guid VetRequestId,
     decimal Amount,

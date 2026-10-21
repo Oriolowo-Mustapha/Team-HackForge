@@ -4,6 +4,12 @@ using MediatR;
 
 namespace FarmHand.Application.Features.Goats;
 
+/// <summary>Creates a livestock record. The current handler does not persist it.</summary>
+/// <param name="FarmId">Owning farm id.</param>
+/// <param name="Species">Species, for example "goat".</param>
+/// <param name="AnimalName">Animal name or tag.</param>
+/// <param name="Sex">Sex of the animal.</param>
+/// <param name="ApproximateAge">Approximate age in months.</param>
 public record CreateLivestockRecordCommand(
     Guid FarmId,
     string Species,
