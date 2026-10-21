@@ -2,6 +2,8 @@ using FarmHand.Application.Common.Interfaces;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using System.Net.Http.Headers;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 
 namespace FarmHand.Infrastructure.Services;
@@ -33,6 +35,14 @@ public class CloudinaryService : ICloudinaryService
 
     public async Task<CloudinaryUploadResult> UploadImageAsync(Stream imageStream, string fileName, string folder = "farmhand", CancellationToken ct = default)
     {
+        var timestamp = ((int)(DateTime.UtcNow - new DateTime(1970, 1, 1)).TotalSeconds).ToString();
+        var folderParam = $"folder={folder}";
+        var timestampParam = $"timestamp={timestamp}";
+
+        // Cloudinary signature: HMAC-SHA1 of sorted parameters concatenated with api_secret
+        var toSign = $"{folderParam}&{timestampParam}&{_apiSecret}";
+        var signature = ComputeSignature(toSign);
+
         var uploadUrl = $"https://api.cloudinary.com/v1_1/{_cloudName}/image/upload";
 
         using var content = new MultipartFormDataContent();
@@ -41,6 +51,8 @@ public class CloudinaryService : ICloudinaryService
         content.Add(streamContent, "file", fileName);
         content.Add(new StringContent(_apiKey), "api_key");
         content.Add(new StringContent(folder), "folder");
+        content.Add(new StringContent(timestamp), "timestamp");
+        content.Add(new StringContent(signature), "signature");
         content.Add(new StringContent("auto"), "quality");
         content.Add(new StringContent("auto"), "fetch_format");
 
@@ -68,14 +80,26 @@ public class CloudinaryService : ICloudinaryService
 
     public async Task<bool> DeleteImageAsync(string publicId, CancellationToken ct = default)
     {
+        var timestamp = ((int)(DateTime.UtcNow - new DateTime(1970, 1, 1)).TotalSeconds).ToString();
+        var toSign = $"public_id={publicId}&timestamp={timestamp}&{_apiSecret}";
+        var signature = ComputeSignature(toSign);
+
         var deleteUrl = $"https://api.cloudinary.com/v1_1/{_cloudName}/image/destroy";
 
         using var content = new MultipartFormDataContent();
         content.Add(new StringContent(publicId), "public_id");
         content.Add(new StringContent(_apiKey), "api_key");
+        content.Add(new StringContent(timestamp), "timestamp");
+        content.Add(new StringContent(signature), "signature");
 
-        // In production, you'd sign this request with api_secret
         var response = await _httpClient.PostAsync(deleteUrl, content, ct);
         return response.IsSuccessStatusCode;
+    }
+
+    private string ComputeSignature(string dataToSign)
+    {
+        using var hmac = new HMACSHA1(Encoding.UTF8.GetBytes(_apiSecret));
+        var hash = hmac.ComputeHash(Encoding.UTF8.GetBytes(dataToSign));
+        return BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant();
     }
 }

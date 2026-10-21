@@ -406,6 +406,9 @@ namespace FarmHand.Persistence.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("TransactionReference")
+                        .IsUnique();
+
                     b.HasIndex("VetRequestId");
 
                     b.ToTable("Payments");
@@ -441,6 +444,10 @@ namespace FarmHand.Persistence.Migrations
                     b.Property<Guid>("FlockId")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("IdempotencyKey")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
                     b.Property<string>("ImageUrl")
                         .HasMaxLength(500)
                         .HasColumnType("character varying(500)");
@@ -468,6 +475,9 @@ namespace FarmHand.Persistence.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("FlockId");
+
+                    b.HasIndex("IdempotencyKey")
+                        .IsUnique();
 
                     b.HasIndex("RecordedAt");
 
@@ -502,7 +512,8 @@ namespace FarmHand.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("IncidentId");
+                    b.HasIndex("IncidentId")
+                        .IsUnique();
 
                     b.ToTable("PreventionPlans");
                 });
@@ -541,7 +552,8 @@ namespace FarmHand.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("VetRequestId");
+                    b.HasIndex("VetRequestId")
+                        .IsUnique();
 
                     b.ToTable("TreatmentPlans");
                 });
@@ -664,6 +676,12 @@ namespace FarmHand.Persistence.Migrations
 
             modelBuilder.Entity("FarmHand.Domain.Entities.CostShare", b =>
                 {
+                    b.HasOne("FarmHand.Domain.Entities.VetRequest", null)
+                        .WithMany()
+                        .HasForeignKey("VetRequestId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
                     b.OwnsOne("FarmHand.Domain.ValueObjects.Money", "Amount", b1 =>
                         {
                             b1.Property<Guid>("CostShareId")
@@ -691,8 +709,65 @@ namespace FarmHand.Persistence.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("FarmHand.Domain.Entities.Flock", b =>
+                {
+                    b.HasOne("FarmHand.Domain.Entities.Farm", null)
+                        .WithMany()
+                        .HasForeignKey("FarmId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("FarmHand.Domain.Entities.FollowUp", b =>
+                {
+                    b.HasOne("FarmHand.Domain.Entities.Incident", null)
+                        .WithMany()
+                        .HasForeignKey("IncidentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("FarmHand.Domain.Entities.Incident", b =>
+                {
+                    b.HasOne("FarmHand.Domain.Entities.Farm", null)
+                        .WithMany()
+                        .HasForeignKey("FarmId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("FarmHand.Domain.Entities.Flock", null)
+                        .WithMany()
+                        .HasForeignKey("FlockId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("FarmHand.Domain.Entities.IncidentAction", b =>
+                {
+                    b.HasOne("FarmHand.Domain.Entities.Incident", null)
+                        .WithMany()
+                        .HasForeignKey("IncidentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("FarmHand.Domain.Entities.LivestockRecord", b =>
+                {
+                    b.HasOne("FarmHand.Domain.Entities.Farm", null)
+                        .WithMany()
+                        .HasForeignKey("FarmId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("FarmHand.Domain.Entities.Payment", b =>
                 {
+                    b.HasOne("FarmHand.Domain.Entities.VetRequest", null)
+                        .WithMany()
+                        .HasForeignKey("VetRequestId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
                     b.OwnsOne("FarmHand.Domain.ValueObjects.Money", "Amount", b1 =>
                         {
                             b1.Property<Guid>("PaymentId")
@@ -720,8 +795,50 @@ namespace FarmHand.Persistence.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("FarmHand.Domain.Entities.PoultryObservation", b =>
+                {
+                    b.HasOne("FarmHand.Domain.Entities.Flock", null)
+                        .WithMany()
+                        .HasForeignKey("FlockId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("FarmHand.Domain.Entities.PreventionPlan", b =>
+                {
+                    b.HasOne("FarmHand.Domain.Entities.Incident", null)
+                        .WithOne()
+                        .HasForeignKey("FarmHand.Domain.Entities.PreventionPlan", "IncidentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("FarmHand.Domain.Entities.TreatmentPlan", b =>
+                {
+                    b.HasOne("FarmHand.Domain.Entities.VetRequest", null)
+                        .WithOne()
+                        .HasForeignKey("FarmHand.Domain.Entities.TreatmentPlan", "VetRequestId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("FarmHand.Domain.Entities.TreatmentScheduleItem", b =>
+                {
+                    b.HasOne("FarmHand.Domain.Entities.TreatmentPlan", null)
+                        .WithMany()
+                        .HasForeignKey("TreatmentPlanId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("FarmHand.Domain.Entities.VetRequest", b =>
                 {
+                    b.HasOne("FarmHand.Domain.Entities.Incident", null)
+                        .WithMany()
+                        .HasForeignKey("IncidentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
                     b.OwnsOne("FarmHand.Domain.ValueObjects.Money", "FarmerCost", b1 =>
                         {
                             b1.Property<Guid>("VetRequestId")

@@ -17,5 +17,11 @@ public class PaymentConfiguration : IEntityTypeConfiguration<Payment>
         builder.Property(x => x.Status).HasMaxLength(50);
         builder.Property(x => x.TransactionReference).HasMaxLength(200);
         builder.HasIndex(x => x.VetRequestId);
+        builder.HasIndex(x => x.TransactionReference).IsUnique();
+
+        builder.HasOne<VetRequest>()
+            .WithMany()
+            .HasForeignKey(x => x.VetRequestId)
+            .OnDelete(DeleteBehavior.Cascade);
     }
 }

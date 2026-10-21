@@ -13,5 +13,10 @@ public class TreatmentPlanConfiguration : IEntityTypeConfiguration<TreatmentPlan
         builder.Property(x => x.InstructionsText).IsRequired().HasMaxLength(2000);
         builder.Property(x => x.Language).HasMaxLength(20);
         builder.HasIndex(x => x.VetRequestId);
+
+        builder.HasOne<VetRequest>()
+            .WithOne()
+            .HasForeignKey<TreatmentPlan>(x => x.VetRequestId)
+            .OnDelete(DeleteBehavior.Cascade);
     }
 }

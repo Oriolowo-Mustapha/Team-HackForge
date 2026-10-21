@@ -13,11 +13,11 @@ public record CreateLivestockRecordCommand(
 
 public class CreateLivestockRecordCommandHandler : IRequestHandler<CreateLivestockRecordCommand, Guid>
 {
-    private readonly IUnitOfWork _unitOfWork;
+    private readonly ILivestockRecordRepository _livestockRepository;
 
-    public CreateLivestockRecordCommandHandler(IUnitOfWork unitOfWork)
+    public CreateLivestockRecordCommandHandler(ILivestockRecordRepository livestockRepository)
     {
-        _unitOfWork = unitOfWork;
+        _livestockRepository = livestockRepository;
     }
 
     public async Task<Guid> Handle(CreateLivestockRecordCommand request, CancellationToken ct)
@@ -29,11 +29,7 @@ public class CreateLivestockRecordCommandHandler : IRequestHandler<CreateLivesto
             request.Sex,
             request.ApproximateAge);
 
-        _unitOfWork.GetType(); // placeholder to satisfy unit of work pattern
-
-        // Note: In a full implementation, we'd inject ILivestockRecordRepository here
-        await _unitOfWork.SaveChangesAsync(ct);
-
+        await _livestockRepository.AddAsync(record, ct);
         return record.Id;
     }
 }

@@ -13,6 +13,7 @@ public class PoultryObservation : BaseEntity
     public string? VisionAnalysis { get; protected set; }
     public ObservationConfirmationStatus ConfirmationStatus { get; protected set; }
     public string? ExtractedByAi { get; protected set; }
+    public string? IdempotencyKey { get; protected set; }
 
     protected PoultryObservation() { }
 
@@ -55,16 +56,15 @@ public class PoultryObservation : BaseEntity
         MarkUpdated();
     }
 
-    public void MarkAiExtracted(string aiModel)
+public void MarkAiExtracted(string aiModel)
     {
         ExtractedByAi = aiModel;
         MarkUpdated();
     }
 
-    public void SetImageAnalysis(string imageUrl, string visionAnalysis)
+    public void SetIdempotencyKey(string key)
     {
-        ImageUrl = imageUrl;
-        VisionAnalysis = visionAnalysis;
+        IdempotencyKey = key;
         MarkUpdated();
     }
 }

@@ -16,5 +16,10 @@ public class VetRequestConfiguration : IEntityTypeConfiguration<VetRequest>
         });
         builder.HasIndex(x => x.IncidentId);
         builder.HasIndex(x => x.Status);
+
+        builder.HasOne<Incident>()
+            .WithMany()
+            .HasForeignKey(x => x.IncidentId)
+            .OnDelete(DeleteBehavior.Cascade);
     }
 }

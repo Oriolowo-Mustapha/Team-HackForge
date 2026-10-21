@@ -16,5 +16,14 @@ public class IncidentConfiguration : IEntityTypeConfiguration<Incident>
         builder.HasIndex(x => x.FarmId);
         builder.HasIndex(x => x.FlockId);
         builder.HasIndex(x => x.Status);
+
+        builder.HasOne<Farm>()
+            .WithMany()
+            .HasForeignKey(x => x.FarmId)
+            .OnDelete(DeleteBehavior.Cascade);
+        builder.HasOne<Flock>()
+            .WithMany()
+            .HasForeignKey(x => x.FlockId)
+            .OnDelete(DeleteBehavior.Cascade);
     }
 }

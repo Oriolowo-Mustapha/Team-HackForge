@@ -5,6 +5,7 @@ using FarmHand.Infrastructure.AI.Services;
 using FarmHand.Infrastructure.Payments;
 using FarmHand.Infrastructure.Persistence;
 using FarmHand.Infrastructure.Repositories;
+using FarmHand.Infrastructure.SeedData;
 using FarmHand.Infrastructure.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -50,6 +51,8 @@ public static class ServiceRegistration
         services.AddHttpClient<IGroqVisionService, GroqVisionService>();
         services.AddScoped<IGroqVisionService, GroqVisionService>();
         services.AddScoped<IVisionAnalysisService, VisionAnalysisService>();
+        services.AddScoped<ILivestockRecordRepository, LivestockRecordRepository>();
+        services.AddScoped<IDemoDataSeeder, DemoDataSeeder>();
 
         return services;
     }

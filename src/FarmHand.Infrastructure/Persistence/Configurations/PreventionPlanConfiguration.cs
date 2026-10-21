@@ -11,5 +11,10 @@ public class PreventionPlanConfiguration : IEntityTypeConfiguration<PreventionPl
         builder.HasKey(x => x.Id);
         builder.Property(x => x.Content).IsRequired().HasMaxLength(2000);
         builder.HasIndex(x => x.IncidentId);
+
+        builder.HasOne<Incident>()
+            .WithOne()
+            .HasForeignKey<PreventionPlan>(x => x.IncidentId)
+            .OnDelete(DeleteBehavior.Cascade);
     }
 }

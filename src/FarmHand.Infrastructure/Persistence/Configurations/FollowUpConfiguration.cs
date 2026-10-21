@@ -10,5 +10,10 @@ public class FollowUpConfiguration : IEntityTypeConfiguration<FollowUp>
     {
         builder.HasKey(x => x.Id);
         builder.HasIndex(x => x.IncidentId);
+
+        builder.HasOne<Incident>()
+            .WithMany()
+            .HasForeignKey(x => x.IncidentId)
+            .OnDelete(DeleteBehavior.Cascade);
     }
 }
