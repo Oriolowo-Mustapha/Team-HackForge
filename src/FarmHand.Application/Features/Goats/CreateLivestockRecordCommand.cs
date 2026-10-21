@@ -6,6 +6,7 @@ namespace FarmHand.Application.Features.Goats;
 
 public record CreateLivestockRecordCommand(
     Guid FarmId,
+    Guid CategoryId,
     string Species,
     string AnimalName,
     string Sex,
@@ -13,21 +14,23 @@ public record CreateLivestockRecordCommand(
 
 public class CreateLivestockRecordCommandHandler : IRequestHandler<CreateLivestockRecordCommand, Guid>
 {
-    private readonly ILivestockRecordRepository _livestockRepository;
+    private readonly ILivestockAnimalRepository _livestockRepository;
 
-    public CreateLivestockRecordCommandHandler(ILivestockRecordRepository livestockRepository)
+    public CreateLivestockRecordCommandHandler(ILivestockAnimalRepository livestockRepository)
     {
         _livestockRepository = livestockRepository;
     }
 
     public async Task<Guid> Handle(CreateLivestockRecordCommand request, CancellationToken ct)
     {
-        var record = new LivestockRecord(
+        var record = new LivestockAnimal(
             request.FarmId,
-            request.Species,
+            request.CategoryId,
             request.AnimalName,
-            request.Sex,
-            request.ApproximateAge);
+            request.Species,
+            null, // breed
+            request.ApproximateAge,
+            request.Sex);
 
         await _livestockRepository.AddAsync(record, ct);
         return record.Id;
@@ -39,6 +42,7 @@ public class CreateLivestockRecordCommandValidator : AbstractValidator<CreateLiv
     public CreateLivestockRecordCommandValidator()
     {
         RuleFor(x => x.FarmId).NotEqual(Guid.Empty);
+        RuleFor(x => x.CategoryId).NotEqual(Guid.Empty);
         RuleFor(x => x.Species).NotEmpty();
         RuleFor(x => x.AnimalName).NotEmpty();
     }

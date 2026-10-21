@@ -3,7 +3,8 @@ namespace FarmHand.Domain.Interfaces;
 public interface IUnitOfWork : IDisposable
 {
     IFarmRepository Farms { get; }
-    IFlockRepository Flocks { get; }
+    ILivestockCategoryRepository LivestockCategories { get; }
+    ILivestockAnimalRepository LivestockAnimals { get; }
     IPoultryObservationRepository PoultryObservations { get; }
     IIncidentRepository Incidents { get; }
     IVetRequestRepository VetRequests { get; }
@@ -12,6 +13,8 @@ public interface IUnitOfWork : IDisposable
     ITreatmentPlanRepository TreatmentPlans { get; }
     IFollowUpRepository FollowUps { get; }
     IPreventionPlanRepository PreventionPlans { get; }
+    IUserRepository Users { get; }
+    IVetPartnerRepository VetPartners { get; }
 
     Task<int> SaveChangesAsync(CancellationToken ct = default);
 }

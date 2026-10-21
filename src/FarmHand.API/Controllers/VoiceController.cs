@@ -61,8 +61,10 @@ public class VoiceController : ControllerBase
             var extracted = await _aiService.ExtractObservationAsync(sttResult.Transcript, ct);
 
             // 3. Record the observation with pre-extracted data (avoids double AI call)
+            // Voice check-in is flock-level (category-level observation)
             var command = new RecordObservationCommand(
-                flockId,
+                Guid.Empty, // flock-level, no specific animal
+                null, // will be set by caller or use default poultry category
                 sttResult.Transcript,
                 idempotencyKey,
                 PreExtracted: extracted);
@@ -135,8 +137,10 @@ public class VoiceController : ControllerBase
             });
 
             // 6. Record the observation with pre-extracted data and pre-analyzed vision
+            // Image check-in is flock-level (category-level observation)
             var command = new RecordObservationCommand(
-                flockId,
+                Guid.Empty, // flock-level
+                null,
                 textForExtraction,
                 idempotencyKey,
                 uploadResult.SecureUrl,

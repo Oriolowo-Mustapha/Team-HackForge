@@ -8,7 +8,8 @@ public class UnitOfWork : IUnitOfWork
     private readonly FarmHandDbContext _dbContext;
 
     public IFarmRepository Farms { get; }
-    public IFlockRepository Flocks { get; }
+    public ILivestockCategoryRepository LivestockCategories { get; }
+    public ILivestockAnimalRepository LivestockAnimals { get; }
     public IPoultryObservationRepository PoultryObservations { get; }
     public IIncidentRepository Incidents { get; }
     public IVetRequestRepository VetRequests { get; }
@@ -17,12 +18,15 @@ public class UnitOfWork : IUnitOfWork
     public ITreatmentPlanRepository TreatmentPlans { get; }
     public IFollowUpRepository FollowUps { get; }
     public IPreventionPlanRepository PreventionPlans { get; }
+    public IUserRepository Users { get; }
+    public IVetPartnerRepository VetPartners { get; }
 
     public UnitOfWork(FarmHandDbContext dbContext)
     {
         _dbContext = dbContext;
         Farms = new FarmRepository(dbContext);
-        Flocks = new FlockRepository(dbContext);
+        LivestockCategories = new LivestockCategoryRepository(dbContext);
+        LivestockAnimals = new LivestockAnimalRepository(dbContext);
         PoultryObservations = new PoultryObservationRepository(dbContext);
         Incidents = new IncidentRepository(dbContext);
         VetRequests = new VetRequestRepository(dbContext);
@@ -31,6 +35,8 @@ public class UnitOfWork : IUnitOfWork
         TreatmentPlans = new TreatmentPlanRepository(dbContext);
         FollowUps = new FollowUpRepository(dbContext);
         PreventionPlans = new PreventionPlanRepository(dbContext);
+        Users = new UserRepository(dbContext);
+        VetPartners = new VetPartnerRepository(dbContext);
     }
 
     public async Task<int> SaveChangesAsync(CancellationToken ct = default)

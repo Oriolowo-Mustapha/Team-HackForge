@@ -106,40 +106,6 @@ app.UseAuthorization();
 
 app.MapControllers();
 
-// Auth endpoint - issue JWT token
-app.MapPost("/api/auth/login", (LoginRequest req, IConfiguration config) =>
-{
-    var jwtSection = config.GetSection("Jwt");
-    var key = jwtSection["SecretKey"] ?? throw new InvalidOperationException("Jwt:SecretKey missing");
-    var issuer = jwtSection["Issuer"] ?? "FarmHand";
-    var audience = jwtSection["Audience"] ?? "FarmHandUsers";
-    var expiryMinutes = int.Parse(jwtSection["ExpirationMinutes"] ?? "10080");
-
-    // In production, validate credentials against a user store
-    var claims = new[]
-    {
-        new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.NameIdentifier, req.Email),
-        new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.Email, req.Email),
-        new System.Security.Claims.Claim(System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
-        new System.Security.Claims.Claim(System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Iat, DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString()),
-        new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.Role, "Farmer")
-    };
-
-    var signingKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(key));
-    var credentials = new SigningCredentials(signingKey, SecurityAlgorithms.HmacSha256);
-    var token = new System.IdentityModel.Tokens.Jwt.JwtSecurityToken(
-        issuer: issuer,
-        audience: audience,
-        claims: claims,
-        expires: DateTime.UtcNow.AddMinutes(expiryMinutes),
-        signingCredentials: credentials);
-
-    var tokenString = new System.IdentityModel.Tokens.Jwt.JwtSecurityTokenHandler().WriteToken(token);
-    return Results.Ok(new { token = tokenString, expiresAt = token.ValidTo });
-});
-
 app.MapGet("/health", () => Results.Ok(new { status = "healthy", timestamp = DateTime.UtcNow }));
 
 app.Run();
-
-public record LoginRequest(string Email, string Password);

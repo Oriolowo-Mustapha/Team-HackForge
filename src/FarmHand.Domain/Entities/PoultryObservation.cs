@@ -2,7 +2,8 @@ namespace FarmHand.Domain.Entities;
 
 public class PoultryObservation : BaseEntity
 {
-    public Guid FlockId { get; protected set; }
+    public Guid LivestockAnimalId { get; protected set; }
+    public Guid? LivestockCategoryId { get; protected set; } // for flock-level observations
     public DateTime RecordedAt { get; protected set; }
     public int MortalityCount { get; protected set; }
     public string? WaterConsumption { get; protected set; }
@@ -18,7 +19,8 @@ public class PoultryObservation : BaseEntity
     protected PoultryObservation() { }
 
     public PoultryObservation(
-        Guid flockId,
+        Guid livestockAnimalId,
+        Guid? livestockCategoryId,
         DateTime recordedAt,
         int mortalityCount,
         string? waterConsumption,
@@ -28,7 +30,8 @@ public class PoultryObservation : BaseEntity
         string? imageUrl = null,
         string? visionAnalysis = null)
     {
-        FlockId = flockId;
+        LivestockAnimalId = livestockAnimalId;
+        LivestockCategoryId = livestockCategoryId;
         RecordedAt = recordedAt;
         MortalityCount = mortalityCount;
         WaterConsumption = waterConsumption;
@@ -56,7 +59,7 @@ public class PoultryObservation : BaseEntity
         MarkUpdated();
     }
 
-public void MarkAiExtracted(string aiModel)
+    public void MarkAiExtracted(string aiModel)
     {
         ExtractedByAi = aiModel;
         MarkUpdated();
@@ -65,6 +68,13 @@ public void MarkAiExtracted(string aiModel)
     public void SetIdempotencyKey(string key)
     {
         IdempotencyKey = key;
+        MarkUpdated();
+    }
+
+    public void SetImageAnalysis(string imageUrl, string visionAnalysis)
+    {
+        ImageUrl = imageUrl;
+        VisionAnalysis = visionAnalysis;
         MarkUpdated();
     }
 }

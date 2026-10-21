@@ -26,7 +26,8 @@ public static class ServiceRegistration
         // Unit of Work & Repositories
         services.AddScoped<IUnitOfWork, UnitOfWork>();
         services.AddScoped<IFarmRepository, FarmRepository>();
-        services.AddScoped<IFlockRepository, FlockRepository>();
+        services.AddScoped<ILivestockCategoryRepository, LivestockCategoryRepository>();
+        services.AddScoped<ILivestockAnimalRepository, LivestockAnimalRepository>();
         services.AddScoped<IPoultryObservationRepository, PoultryObservationRepository>();
         services.AddScoped<IIncidentRepository, IncidentRepository>();
         services.AddScoped<IVetRequestRepository, VetRequestRepository>();
@@ -51,8 +52,8 @@ public static class ServiceRegistration
         services.AddHttpClient<IGroqVisionService, GroqVisionService>();
         services.AddScoped<IGroqVisionService, GroqVisionService>();
         services.AddScoped<IVisionAnalysisService, VisionAnalysisService>();
-        services.AddScoped<ILivestockRecordRepository, LivestockRecordRepository>();
-        services.AddScoped<IDemoDataSeeder, DemoDataSeeder>();
+        services.AddScoped<IUserRepository, UserRepository>();
+        services.AddScoped<IVetPartnerRepository, VetPartnerRepository>();
 
         return services;
     }

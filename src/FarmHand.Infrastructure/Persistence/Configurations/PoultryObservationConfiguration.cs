@@ -16,13 +16,19 @@ public class PoultryObservationConfiguration : IEntityTypeConfiguration<PoultryO
         builder.Property(x => x.ImageUrl).HasMaxLength(500);
         builder.Property(x => x.VisionAnalysis).HasMaxLength(2000);
         builder.Property(x => x.IdempotencyKey).HasMaxLength(128);
-        builder.HasIndex(x => x.FlockId);
+        builder.HasIndex(x => x.LivestockAnimalId);
+        builder.HasIndex(x => x.LivestockCategoryId);
         builder.HasIndex(x => x.RecordedAt);
         builder.HasIndex(x => x.IdempotencyKey).IsUnique();
 
-        builder.HasOne<Flock>()
+        builder.HasOne<LivestockAnimal>()
             .WithMany()
-            .HasForeignKey(x => x.FlockId)
+            .HasForeignKey(x => x.LivestockAnimalId)
             .OnDelete(DeleteBehavior.Cascade);
+
+        builder.HasOne<LivestockCategory>()
+            .WithMany()
+            .HasForeignKey(x => x.LivestockCategoryId)
+            .OnDelete(DeleteBehavior.SetNull);
     }
 }

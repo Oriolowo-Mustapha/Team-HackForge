@@ -7,7 +7,8 @@ using MediatR;
 namespace FarmHand.Application.Features.Poultry;
 
 public record RecordObservationCommand(
-    Guid FlockId,
+    Guid LivestockAnimalId,
+    Guid? LivestockCategoryId,
     string RawText,
     string IdempotencyKey,
     string? ImageUrl = null,
@@ -75,7 +76,8 @@ public class RecordObservationCommandHandler : IRequestHandler<RecordObservation
         }
 
         var observation = new PoultryObservation(
-            request.FlockId,
+            request.LivestockAnimalId,
+            request.LivestockCategoryId,
             DateTime.UtcNow,
             extracted.MortalityCount,
             extracted.WaterConsumption,
@@ -99,7 +101,7 @@ public class RecordObservationCommandValidator : AbstractValidator<RecordObserva
 {
     public RecordObservationCommandValidator()
     {
-        RuleFor(x => x.FlockId).NotEqual(Guid.Empty);
+        RuleFor(x => x.LivestockAnimalId).NotEqual(Guid.Empty).When(x => x.LivestockCategoryId is null);
         RuleFor(x => x.RawText).NotEmpty().MaximumLength(2000);
         RuleFor(x => x.IdempotencyKey).NotEmpty();
     }

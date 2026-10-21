@@ -9,7 +9,8 @@ namespace FarmHand.Infrastructure.Persistence;
 public class FarmHandDbContext : DbContext
 {
     public DbSet<Farm> Farms => Set<Farm>();
-    public DbSet<Flock> Flocks => Set<Flock>();
+    public DbSet<LivestockCategory> LivestockCategories => Set<LivestockCategory>();
+    public DbSet<LivestockAnimal> LivestockAnimals => Set<LivestockAnimal>();
     public DbSet<PoultryObservation> PoultryObservations => Set<PoultryObservation>();
     public DbSet<Incident> Incidents => Set<Incident>();
     public DbSet<IncidentAction> IncidentActions => Set<IncidentAction>();
@@ -21,8 +22,8 @@ public class FarmHandDbContext : DbContext
     public DbSet<TreatmentScheduleItem> TreatmentScheduleItems => Set<TreatmentScheduleItem>();
     public DbSet<FollowUp> FollowUps => Set<FollowUp>();
     public DbSet<PreventionPlan> PreventionPlans => Set<PreventionPlan>();
-    public DbSet<LivestockRecord> LivestockRecords => Set<LivestockRecord>();
     public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
+    public DbSet<User> Users => Set<User>();
 
     public FarmHandDbContext(DbContextOptions<FarmHandDbContext> options) : base(options) { }
 
@@ -31,7 +32,8 @@ public class FarmHandDbContext : DbContext
         base.OnModelCreating(modelBuilder);
 
         modelBuilder.ApplyConfiguration(new FarmConfiguration());
-        modelBuilder.ApplyConfiguration(new FlockConfiguration());
+        modelBuilder.ApplyConfiguration(new LivestockCategoryConfiguration());
+        modelBuilder.ApplyConfiguration(new LivestockAnimalConfiguration());
         modelBuilder.ApplyConfiguration(new PoultryObservationConfiguration());
         modelBuilder.ApplyConfiguration(new IncidentConfiguration());
         modelBuilder.ApplyConfiguration(new IncidentActionConfiguration());
@@ -43,8 +45,8 @@ public class FarmHandDbContext : DbContext
         modelBuilder.ApplyConfiguration(new TreatmentScheduleItemConfiguration());
         modelBuilder.ApplyConfiguration(new FollowUpConfiguration());
         modelBuilder.ApplyConfiguration(new PreventionPlanConfiguration());
-        modelBuilder.ApplyConfiguration(new LivestockRecordConfiguration());
         modelBuilder.ApplyConfiguration(new AuditEventConfiguration());
+        modelBuilder.ApplyConfiguration(new UserConfiguration());
     }
 
     public override async Task<int> SaveChangesAsync(CancellationToken ct = default)
