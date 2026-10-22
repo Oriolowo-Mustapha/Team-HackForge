@@ -31,7 +31,7 @@ public class AuthController : ControllerBase
     }
 
     /// <summary>Register a new farmer account.</summary>
-    /// <response code="201">Account created and token issued.</response>
+    /// <response code="201">Account created; use <c>POST /api/auth/login</c> to receive a token.</response>
     /// <response code="400">Validation failed or email already registered.</response>
     /// <response code="429">Too many attempts.</response>
     [HttpPost("register")]
@@ -67,15 +67,9 @@ public class AuthController : ControllerBase
             return BadRequest(new { error = "Email already registered." });
         }
 
-        var token = _jwtService.GenerateToken(user.Id.ToString(), user.Email, new[] { user.Role });
-
         return CreatedAtAction(nameof(Login), new { }, new
         {
-            userId = user.Id,
-            email = user.Email,
-            role = user.Role,
-            token = token.AccessToken,
-            expiresAt = token.ExpiresAt
+            message = "Account created successfully. Please log in to receive your access token."
         });
     }
 
@@ -102,6 +96,7 @@ public class AuthController : ControllerBase
 
         return Ok(new
         {
+            message = "Login successful.",
             userId = user.Id,
             email = user.Email,
             role = user.Role,
