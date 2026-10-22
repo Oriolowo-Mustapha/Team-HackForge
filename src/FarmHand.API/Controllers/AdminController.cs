@@ -1,8 +1,11 @@
+using FarmHand.Application.Common.Interfaces;
 using FarmHand.Domain.Entities;
 using FarmHand.Domain.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using System.ComponentModel.DataAnnotations;
+using System.Net;
+using System.Security.Cryptography;
 
 namespace FarmHand.API.Controllers;
 
@@ -14,22 +17,29 @@ public class AdminController : ControllerBase
     private readonly IUserRepository _userRepository;
     private readonly IVetPartnerRepository _vetPartnerRepository;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly IEmailService _emailService;
+    private readonly ILogger<AdminController> _logger;
 
     public AdminController(
         IUserRepository userRepository,
         IVetPartnerRepository vetPartnerRepository,
-        IUnitOfWork unitOfWork)
+        IUnitOfWork unitOfWork,
+        IEmailService emailService,
+        ILogger<AdminController> logger)
     {
         _userRepository = userRepository;
         _vetPartnerRepository = vetPartnerRepository;
         _unitOfWork = unitOfWork;
+        _emailService = emailService;
+        _logger = logger;
     }
 
     /// <summary>
     /// Register a vet doctor on the system. Admin only.
-    /// Creates the User account and VetPartner profile in one transaction.
+    /// Creates the User account and VetPartner profile, then emails the login credentials.
+    /// The temporary password is never returned in the API response.
     /// </summary>
-    /// <response code="201">Vet registered with linked user id.</response>
+    /// <response code="201">Vet registered; <c>credentialsEmailed</c> reports delivery.</response>
     /// <response code="400">Validation failed or email already registered.</response>
     [HttpPost("vets")]
     [ProducesResponseType(StatusCodes.Status201Created)]
@@ -41,22 +51,34 @@ public class AdminController : ControllerBase
         if (await _userRepository.ExistsByEmailAsync(email, ct))
             return BadRequest(new { error = "Email already registered." });
 
-        if (string.IsNullOrWhiteSpace(request.TemporaryPassword) || request.TemporaryPassword.Length < 8)
-            return BadRequest(new { error = "Temporary password must be at least 8 characters." });
+        var temporaryPassword = request.TemporaryPassword;
+        if (string.IsNullOrWhiteSpace(temporaryPassword))
+        {
+            if (!_emailService.IsEnabled)
+                return BadRequest(new { error = "Email delivery is disabled. Provide a temporary password." });
 
-        if (System.Text.Encoding.UTF8.GetByteCount(request.TemporaryPassword) > 72)
-            return BadRequest(new { error = "Temporary password must be at most 72 bytes." });
+            temporaryPassword = GenerateTemporaryPassword();
+        }
+        else
+        {
+            if (temporaryPassword.Length < 8)
+                return BadRequest(new { error = "Temporary password must be at least 8 characters." });
 
+            if (System.Text.Encoding.UTF8.GetByteCount(temporaryPassword) > 72)
+                return BadRequest(new { error = "Temporary password must be at most 72 bytes." });
+        }
+
+        var fullName = request.FullName?.Trim();
         var vetUser = new User(
             email,
-            BCrypt.Net.BCrypt.HashPassword(request.TemporaryPassword),
+            BCrypt.Net.BCrypt.HashPassword(temporaryPassword),
             "Vet",
-            request.FullName?.Trim(),
+            fullName,
             request.PhoneNumber?.Trim());
 
         var vetPartner = new VetPartner(
             vetUser.Id,
-            request.FullName?.Trim() ?? email,
+            fullName ?? email,
             email,
             request.Specialization,
             request.Contact);
@@ -73,6 +95,13 @@ public class AdminController : ControllerBase
             return BadRequest(new { error = "Email already registered." });
         }
 
+        var emailed = await _emailService.SendAsync(
+            BuildCredentialsEmail(vetUser.Email, vetPartner.Name, temporaryPassword),
+            ct);
+
+        if (!emailed)
+            _logger.LogWarning("Vet {VetId} registered but credentials email was not delivered", vetPartner.Id);
+
         return CreatedAtAction(nameof(ListVets), new { }, new
         {
             vetId = vetPartner.Id,
@@ -80,7 +109,55 @@ public class AdminController : ControllerBase
             email = vetUser.Email,
             role = vetUser.Role,
             specialization = vetPartner.Specialization,
-            message = "Vet doctor registered successfully."
+            credentialsEmailed = emailed,
+            message = emailed
+                ? "Vet doctor registered. Login credentials were emailed."
+                : "Vet doctor registered, but the credentials email could not be sent."
+        });
+    }
+
+    /// <summary>
+    /// Issue a new temporary password for a vet and email it. Admin only.
+    /// Existing sessions are invalidated. The password is never returned.
+    /// </summary>
+    /// <response code="200">Credentials regenerated; <c>credentialsEmailed</c> reports delivery.</response>
+    /// <response code="404">Vet or linked user not found.</response>
+    [HttpPost("vets/{vetId}/reset-credentials")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> ResetVetCredentials(Guid vetId, CancellationToken ct)
+    {
+        var vet = await _vetPartnerRepository.GetByIdAsync(vetId, ct);
+        if (vet?.UserId is not { } userId)
+            return NotFound(new { error = "Vet not found." });
+
+        if (!_emailService.IsEnabled)
+            return BadRequest(new { error = "Email delivery is disabled. Credentials cannot be delivered." });
+
+        var user = await _userRepository.GetByIdAsync(userId, ct);
+        if (user is null)
+            return NotFound(new { error = "Vet account not found." });
+
+        var temporaryPassword = GenerateTemporaryPassword();
+        user.ChangePassword(BCrypt.Net.BCrypt.HashPassword(temporaryPassword));
+        user.IncrementTokenVersion();
+        _unitOfWork.Users.Update(user);
+        await _unitOfWork.RefreshTokens.RevokeAllForUserAsync(userId, ct);
+        await _unitOfWork.SaveChangesAsync(ct);
+
+        var emailed = await _emailService.SendAsync(
+            BuildCredentialsEmail(user.Email, vet.Name, temporaryPassword),
+            ct);
+
+        if (!emailed)
+            _logger.LogWarning("Vet {VetId} credentials reset but email was not delivered", vetId);
+
+        return Ok(new
+        {
+            credentialsEmailed = emailed,
+            message = emailed
+                ? "A new temporary password was emailed to the vet."
+                : "Credentials were reset, but the email could not be sent."
         });
     }
 
@@ -109,6 +186,7 @@ public class AdminController : ControllerBase
                 v.Specialization,
                 v.Contact,
                 v.IsActive,
+                v.HasPayoutAccount,
                 v.CreatedAt
             });
 
@@ -151,11 +229,80 @@ public class AdminController : ControllerBase
 
         return Ok(new { message = "Vet deactivated." });
     }
+
+    private static string GenerateTemporaryPassword()
+    {
+        const string upper = "ABCDEFGHJKLMNPQRSTUVWXYZ";
+        const string lower = "abcdefghijkmnopqrstuvwxyz";
+        const string digits = "23456789";
+        const string symbols = "!@#$%&*";
+        const string all = upper + lower + digits + symbols;
+
+        Span<char> password = stackalloc char[14];
+        password[0] = upper[RandomNumberGenerator.GetInt32(upper.Length)];
+        password[1] = lower[RandomNumberGenerator.GetInt32(lower.Length)];
+        password[2] = digits[RandomNumberGenerator.GetInt32(digits.Length)];
+        password[3] = symbols[RandomNumberGenerator.GetInt32(symbols.Length)];
+
+        for (var i = 4; i < password.Length; i++)
+            password[i] = all[RandomNumberGenerator.GetInt32(all.Length)];
+
+        // Shuffle so the guaranteed character classes are not in fixed positions.
+        for (var i = password.Length - 1; i > 0; i--)
+        {
+            var j = RandomNumberGenerator.GetInt32(i + 1);
+            (password[i], password[j]) = (password[j], password[i]);
+        }
+
+        return new string(password);
+    }
+
+    private static EmailMessage BuildCredentialsEmail(string email, string name, string temporaryPassword)
+    {
+        var safeName = WebUtility.HtmlEncode(name);
+        var safeEmail = WebUtility.HtmlEncode(email);
+        var safePassword = WebUtility.HtmlEncode(temporaryPassword);
+
+        var html = $"""
+            <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;color:#1f2937">
+              <h2 style="color:#166534">Welcome to FarmHand</h2>
+              <p>Hello {safeName},</p>
+              <p>An administrator created your veterinarian account.</p>
+              <table style="border-collapse:collapse;margin:16px 0">
+                <tr>
+                  <td style="padding:6px 12px;font-weight:bold">Email</td>
+                  <td style="padding:6px 12px">{safeEmail}</td>
+                </tr>
+                <tr>
+                  <td style="padding:6px 12px;font-weight:bold">Temporary password</td>
+                  <td style="padding:6px 12px;font-family:monospace">{safePassword}</td>
+                </tr>
+              </table>
+              <p>For your security, sign in and change this password immediately.</p>
+              <p style="color:#6b7280;font-size:12px">If you did not expect this account, contact your FarmHand administrator.</p>
+            </div>
+            """;
+
+        var text = $"""
+            Welcome to FarmHand
+
+            Hello {name},
+
+            An administrator created your veterinarian account.
+
+            Email: {email}
+            Temporary password: {temporaryPassword}
+
+            For your security, sign in and change this password immediately.
+            """;
+
+        return new EmailMessage(email, "Your FarmHand vet account", html, text);
+    }
 }
 
 public record RegisterVetRequest(
     [Required, EmailAddress, MaxLength(255)] string Email,
-    [Required] string TemporaryPassword,
+    [MaxLength(100)] string? TemporaryPassword,
     [MaxLength(200)] string? FullName,
     [Required, MaxLength(100)] string Specialization,
     [Required, MaxLength(200)] string Contact,

@@ -1,5 +1,6 @@
 using FarmHand.API.Services;
 using FarmHand.Application.Common.Behaviors;
+using FarmHand.Application.Common.Exceptions;
 using FarmHand.Application.Common.Interfaces;
 using FarmHand.Application.Common.Services;
 using FarmHand.Application.Features.Farms;
@@ -211,10 +212,11 @@ app.UseExceptionHandler(errorApp =>
 
             var status = exception switch
             {
+                PublicException publicException => publicException.StatusCode,
                 ValidationException => StatusCodes.Status400BadRequest,
+                BadHttpRequestException => StatusCodes.Status400BadRequest,
                 KeyNotFoundException => StatusCodes.Status404NotFound,
                 UnauthorizedAccessException => StatusCodes.Status403Forbidden,
-                ArgumentOutOfRangeException => StatusCodes.Status400BadRequest,
                 ArgumentException => StatusCodes.Status400BadRequest,
                 InvalidOperationException => StatusCodes.Status409Conflict,
                 DbUpdateException => StatusCodes.Status409Conflict,
@@ -227,23 +229,28 @@ app.UseExceptionHandler(errorApp =>
             else
                 logger.LogWarning(exception, "Request failed with {StatusCode}", status);
 
+            // Only explicitly public messages and validation errors are exposed.
+            // Framework exception messages can contain paths, SQL, or other internals.
+            var title = status switch
+            {
+                StatusCodes.Status400BadRequest => "The request is invalid.",
+                StatusCodes.Status403Forbidden => "You do not have permission to perform this action.",
+                StatusCodes.Status404NotFound => "The requested resource was not found.",
+                StatusCodes.Status409Conflict => "The request conflicts with the current state.",
+                StatusCodes.Status502BadGateway => "An upstream service is temporarily unavailable.",
+                _ => "An error occurred while processing your request."
+            };
+
             var problem = new ProblemDetails
             {
                 Status = status,
-                Title = status switch
-                {
-                    StatusCodes.Status400BadRequest => "The request is invalid.",
-                    StatusCodes.Status403Forbidden => "You do not have permission to perform this action.",
-                    StatusCodes.Status404NotFound => "The requested resource was not found.",
-                    StatusCodes.Status409Conflict => "The request conflicts with the current state.",
-                    StatusCodes.Status502BadGateway => "An upstream service failed.",
-                    _ => "An error occurred while processing your request."
-                },
-                Detail = status == StatusCodes.Status500InternalServerError
-                    ? "Please check the server logs for more information."
-                    : exception?.Message,
+                Title = title,
+                Detail = exception is PublicException publicError ? publicError.Message : null,
+                Instance = context.Request.Path,
                 Type = $"https://farmhand.ai/problems/{status}"
             };
+
+            problem.Extensions["traceId"] = context.TraceIdentifier;
 
             if (exception is ValidationException validationException)
             {

@@ -163,6 +163,44 @@ public class AuthController : ControllerBase
         return Ok(new { message = "All sessions revoked." });
     }
 
+    /// <summary>Change the current user's password and invalidate existing sessions.</summary>
+    /// <response code="200">Password changed; sign in again with the new password.</response>
+    /// <response code="400">Current password is incorrect or the new password is invalid.</response>
+    /// <response code="401">Missing or invalid bearer token.</response>
+    [HttpPost("change-password")]
+    [Authorize]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    public async Task<IActionResult> ChangePassword([FromBody] ChangePasswordRequest request, CancellationToken ct)
+    {
+        var userIdClaim = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (userIdClaim is null || !Guid.TryParse(userIdClaim, out var userId))
+            return Unauthorized();
+
+        var user = await _userRepository.GetByIdAsync(userId, ct);
+        if (user is null || !user.IsActive)
+            return Unauthorized(new { error = "User account is inactive." });
+
+        if (!PasswordMatches(request.CurrentPassword, user.PasswordHash))
+            return BadRequest(new { error = "Current password is incorrect." });
+
+        if (string.Equals(request.CurrentPassword, request.NewPassword, StringComparison.Ordinal))
+            return BadRequest(new { error = "New password must be different from the current password." });
+
+        var passwordError = ValidatePassword(request.NewPassword);
+        if (passwordError is not null)
+            return BadRequest(new { error = passwordError });
+
+        user.ChangePassword(BCrypt.Net.BCrypt.HashPassword(request.NewPassword));
+        user.IncrementTokenVersion();
+        _unitOfWork.Users.Update(user);
+        await _unitOfWork.RefreshTokens.RevokeAllForUserAsync(user.Id, ct);
+        await _unitOfWork.SaveChangesAsync(ct);
+
+        return Ok(new { message = "Password changed. Please sign in again." });
+    }
+
     private static bool PasswordMatches(string? password, string? passwordHash)
     {
         try
@@ -199,3 +237,7 @@ public record LoginRequest(
     [Required] string Password);
 
 public record RefreshRequest([Required] string RefreshToken);
+
+public record ChangePasswordRequest(
+    [Required] string CurrentPassword,
+    [Required, MinLength(8), MaxLength(100)] string NewPassword);

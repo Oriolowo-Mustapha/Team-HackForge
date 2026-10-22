@@ -1,3 +1,4 @@
+using FarmHand.Application.Common.Exceptions;
 using FarmHand.Application.Common.Interfaces;
 using FarmHand.Domain.Entities;
 using FarmHand.Domain.Enums;
@@ -10,10 +11,12 @@ namespace FarmHand.Application.Features.VetCoordination;
 /// <param name="IncidentId">Incident id; must match the route value.</param>
 /// <param name="RequestType">Coordination model, sent as an integer (0-2).</param>
 /// <param name="FarmerCost">Farmer's share of the cost, in NGN.</param>
+/// <param name="VetPartnerId">Optional preferred vet; enables automatic payout splitting.</param>
 public record CreateVetRequestCommand(
     Guid IncidentId,
     RequestType RequestType,
-    decimal FarmerCost) : IRequest<Guid>;
+    decimal FarmerCost,
+    Guid? VetPartnerId = null) : IRequest<Guid>;
 
 public class CreateVetRequestCommandHandler : IRequestHandler<CreateVetRequestCommand, Guid>
 {
@@ -35,10 +38,18 @@ public class CreateVetRequestCommandHandler : IRequestHandler<CreateVetRequestCo
     {
         await _authorization.EnsureIncidentAccessAsync(request.IncidentId, ct);
 
+        if (request.VetPartnerId is { } vetPartnerId)
+        {
+            var vet = await _unitOfWork.VetPartners.GetByIdAsync(vetPartnerId, ct);
+            if (vet is null || !vet.IsActive)
+                throw PublicException.BadRequest("The selected vet is not available.");
+        }
+
         var vetRequest = new VetRequest(
             request.IncidentId,
             request.RequestType,
-            new Domain.ValueObjects.Money(request.FarmerCost));
+            new Domain.ValueObjects.Money(request.FarmerCost),
+            request.VetPartnerId);
 
         await _vetRequestRepository.AddAsync(vetRequest, ct);
         await _unitOfWork.SaveChangesAsync(ct);

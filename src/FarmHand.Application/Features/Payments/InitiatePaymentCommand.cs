@@ -1,3 +1,4 @@
+using FarmHand.Application.Common.Exceptions;
 using FarmHand.Application.Common.Interfaces;
 using FarmHand.Domain.Entities;
 using FarmHand.Domain.Interfaces;
@@ -21,7 +22,9 @@ public record InitiatePaymentResult(
     string TransactionReference,
     string? CheckoutUrl,
     decimal PlatformCommission,
-    decimal TotalAmount);
+    decimal TotalAmount,
+    decimal VetPayoutAmount,
+    bool VetSubaccountUsed);
 
 public class InitiatePaymentCommandHandler : IRequestHandler<InitiatePaymentCommand, InitiatePaymentResult>
 {
@@ -53,25 +56,39 @@ public class InitiatePaymentCommandHandler : IRequestHandler<InitiatePaymentComm
         await _authorization.EnsureVetRequestAccessAsync(request.VetRequestId, ct);
 
         var vetRequest = await _vetRequestRepository.GetByIdAsync(request.VetRequestId, ct)
-            ?? throw new KeyNotFoundException($"Vet request {request.VetRequestId} not found.");
+            ?? throw PublicException.NotFound("Vet request not found.");
 
         var currency = request.Currency.Trim().ToUpperInvariant();
 
         // The vet request's farmer cost is authoritative; reject amount/currency tampering.
         if (request.Amount != vetRequest.FarmerCost.Amount)
-            throw new ArgumentException(
-                $"Amount does not match the vet request farmer cost ({vetRequest.FarmerCost.Amount} {vetRequest.FarmerCost.Currency}).");
+            throw PublicException.BadRequest(
+                $"Amount must match the vet request charge of {vetRequest.FarmerCost.Amount} {vetRequest.FarmerCost.Currency}.");
 
         if (!string.Equals(vetRequest.FarmerCost.Currency, currency, StringComparison.OrdinalIgnoreCase))
-            throw new ArgumentException(
-                $"Currency does not match the vet request currency ({vetRequest.FarmerCost.Currency}).");
+            throw PublicException.BadRequest(
+                $"Currency must match the vet request currency of {vetRequest.FarmerCost.Currency}.");
 
         var customerEmail = _currentUser.Email
-            ?? throw new InvalidOperationException("No authenticated customer email available to initialize payment.");
+            ?? throw PublicException.Forbidden("An authenticated customer email is required to initialize payment.");
 
         // Platform commission is calculated on top of the vet's charge
         var commission = request.Amount * request.PlatformCommissionPercentage / 100m;
         var totalAmount = request.Amount + commission;
+
+        // When the vet already has a payout subaccount, split the charge automatically.
+        // The vet receives their full charge; the platform keeps the commission.
+        PaymentSplit? split = null;
+        if (vetRequest.VetPartnerId is { } vetPartnerId)
+        {
+            var vetPartner = await _unitOfWork.VetPartners.GetByIdAsync(vetPartnerId, ct);
+            if (vetPartner is { IsActive: true, HasPayoutAccount: true } && !string.IsNullOrWhiteSpace(vetPartner.PaymentSubaccountId))
+            {
+                // Flutterwave expects the platform's commission as a fraction of the total charge.
+                var platformCommissionRate = commission / totalAmount;
+                split = new PaymentSplit(vetPartner.PaymentSubaccountId, platformCommissionRate);
+            }
+        }
 
         var result = await _paymentService.InitiatePaymentAsync(
             request.VetRequestId,
@@ -79,10 +96,11 @@ public class InitiatePaymentCommandHandler : IRequestHandler<InitiatePaymentComm
             currency,
             customerEmail,
             null,
+            split,
             ct);
 
         if (!result.Success || string.IsNullOrWhiteSpace(result.TransactionReference))
-            throw new InvalidOperationException(result.ErrorMessage ?? "Payment initiation failed.");
+            throw PublicException.Upstream(result.ErrorMessage ?? "Payment could not be initialized. Please try again.");
 
         var payment = new Payment(request.VetRequestId, new Money(request.Amount, currency), request.PlatformCommissionPercentage);
         payment.MarkPending(result.TransactionReference);
@@ -90,7 +108,13 @@ public class InitiatePaymentCommandHandler : IRequestHandler<InitiatePaymentComm
         await _paymentRepository.AddAsync(payment, ct);
         await _unitOfWork.SaveChangesAsync(ct);
 
-        return new InitiatePaymentResult(result.TransactionReference, result.CheckoutUrl, commission, totalAmount);
+        return new InitiatePaymentResult(
+            result.TransactionReference,
+            result.CheckoutUrl,
+            commission,
+            totalAmount,
+            request.Amount,
+            split is not null);
     }
 }
 
@@ -101,6 +125,8 @@ public class InitiatePaymentCommandValidator : AbstractValidator<InitiatePayment
         RuleFor(x => x.VetRequestId).NotEqual(Guid.Empty);
         RuleFor(x => x.Amount).GreaterThan(0);
         RuleFor(x => x.Currency).NotEmpty().Length(3).MaximumLength(10);
-        RuleFor(x => x.PlatformCommissionPercentage).GreaterThanOrEqualTo(0).LessThanOrEqualTo(100);
+        RuleFor(x => x.PlatformCommissionPercentage)
+            .Equal(5m)
+            .WithMessage("Platform commission is fixed at 5%.");
     }
 }

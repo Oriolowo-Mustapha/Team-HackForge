@@ -49,16 +49,18 @@ public class PaymentsController : ControllerBase
     /// <param name="request">Vet request, amount, and currency.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <response code="200">Reference created; body contains <c>transactionReference</c> and <c>checkoutUrl</c>.</response>
-    /// <response code="400">Provider rejected the initiation request.</response>
+    /// <response code="400">Validation failed or the amount/currency does not match the vet request.</response>
     /// <response code="401">Missing or invalid bearer token.</response>
     /// <response code="403">The vet request belongs to another farm.</response>
     /// <response code="404">Vet request not found.</response>
+    /// <response code="502">The payment provider is unavailable.</response>
     [HttpPost("initiate")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status502BadGateway)]
     public async Task<IActionResult> InitiatePayment(
         [FromBody] InitiatePaymentRequest request,
         CancellationToken ct)
@@ -72,7 +74,9 @@ public class PaymentsController : ControllerBase
             transactionReference = result.TransactionReference,
             checkoutUrl = result.CheckoutUrl,
             platformCommission = result.PlatformCommission,
-            totalAmount = result.TotalAmount
+            totalAmount = result.TotalAmount,
+            vetPayoutAmount = result.VetPayoutAmount,
+            vetSubaccountUsed = result.VetSubaccountUsed
         });
     }
 
@@ -89,6 +93,7 @@ public class PaymentsController : ControllerBase
     /// <response code="403">The vet request belongs to another farm.</response>
     /// <response code="404">Payment reference or vet request not found.</response>
     /// <response code="409">Payment could not be completed.</response>
+    /// <response code="502">The payment provider is unavailable.</response>
     [HttpPost("record")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -96,6 +101,7 @@ public class PaymentsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status502BadGateway)]
     public async Task<IActionResult> RecordPayment(
         [FromBody] RecordPaymentCommand command,
         CancellationToken ct)
@@ -114,10 +120,12 @@ public class PaymentsController : ControllerBase
     /// <param name="ct">Cancellation token.</param>
     /// <response code="200">Webhook acknowledged.</response>
     /// <response code="401">Invalid or missing webhook signature.</response>
+    /// <response code="503">Webhook verification is not configured on this server.</response>
     [HttpPost("webhook")]
     [AllowAnonymous]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
     public async Task<IActionResult> FlutterwaveWebhook(CancellationToken ct)
     {
         Request.EnableBuffering();
@@ -128,45 +136,77 @@ public class PaymentsController : ControllerBase
         var flutterwaveSignature = Request.Headers["flutterwave-signature"].FirstOrDefault();
         var verifHash = Request.Headers["verif-hash"].FirstOrDefault();
 
+        if (string.IsNullOrWhiteSpace(secretHash))
+        {
+            // Fail closed: an unconfigured secret would let anyone forge a valid HMAC.
+            _logger.LogError("Flutterwave webhook secret is not configured; rejecting webhook");
+            return StatusCode(StatusCodes.Status503ServiceUnavailable);
+        }
+
         if (!_paymentService.VerifyWebhookSignature(rawBody, flutterwaveSignature, verifHash, secretHash))
         {
             _logger.LogWarning("Flutterwave webhook signature verification failed");
             return Unauthorized();
         }
 
-        using var doc = JsonDocument.Parse(rawBody);
-        var root = doc.RootElement;
-        var eventType = root.TryGetProperty("event", out var eventEl) ? eventEl.GetString() : string.Empty;
-        if (!root.TryGetProperty("data", out var data))
-            return Ok();
-
-        var txRef = data.TryGetProperty("tx_ref", out var txRefEl) ? txRefEl.GetString() : string.Empty;
-        var flutterwaveId = data.TryGetProperty("id", out var idEl) ? idEl.GetString() : string.Empty;
-        var status = data.TryGetProperty("status", out var statusEl) ? statusEl.GetString() : string.Empty;
-        var isSuccessful = string.Equals(status, "successful", StringComparison.OrdinalIgnoreCase);
-        var isChargeEvent = string.Equals(eventType, "charge.completed", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(eventType, "payment.completed", StringComparison.OrdinalIgnoreCase);
-
-        if (isChargeEvent && isSuccessful && !string.IsNullOrWhiteSpace(flutterwaveId))
+        JsonDocument doc;
+        try
         {
-            var verification = await _paymentService.VerifyPaymentAsync(flutterwaveId, ct);
-            if (verification.Success)
-            {
-                var payment = await _paymentRepository.GetByTransactionReferenceAsync(flutterwaveId, ct)
-                    ?? (!string.IsNullOrWhiteSpace(txRef)
-                        ? await _paymentRepository.GetByTransactionReferenceAsync(txRef, ct)
-                        : null);
+            doc = JsonDocument.Parse(rawBody);
+        }
+        catch (JsonException)
+        {
+            return BadRequest(new { error = "Invalid webhook payload." });
+        }
 
-                if (payment is not null && payment.Status != "Completed")
+        using (doc)
+        {
+            var root = doc.RootElement;
+            var eventType = ReadText(root, "event") ?? string.Empty;
+            if (!root.TryGetProperty("data", out var data))
+                return Ok();
+
+            var txRef = ReadText(data, "tx_ref") ?? string.Empty;
+            var flutterwaveId = ReadText(data, "id") ?? string.Empty;
+            var status = ReadText(data, "status") ?? string.Empty;
+            var isSuccessful = string.Equals(status, "successful", StringComparison.OrdinalIgnoreCase);
+            var isChargeEvent = string.Equals(eventType, "charge.completed", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(eventType, "payment.completed", StringComparison.OrdinalIgnoreCase);
+
+            if (isChargeEvent && isSuccessful && !string.IsNullOrWhiteSpace(flutterwaveId))
+            {
+                var verification = await _paymentService.VerifyPaymentAsync(flutterwaveId, ct);
+                if (verification.Success)
                 {
-                    payment.MarkCompleted(flutterwaveId);
-                    await _unitOfWork.SaveChangesAsync(ct);
-                    _logger.LogInformation("Payment {TransactionReference} marked completed via webhook", flutterwaveId);
+                    var payment = await _paymentRepository.GetByTransactionReferenceAsync(flutterwaveId, ct)
+                        ?? (!string.IsNullOrWhiteSpace(txRef)
+                            ? await _paymentRepository.GetByTransactionReferenceAsync(txRef, ct)
+                            : null);
+
+                    if (payment is not null && payment.Status != "Completed")
+                    {
+                        payment.MarkCompleted(flutterwaveId);
+                        await _unitOfWork.SaveChangesAsync(ct);
+                        _logger.LogInformation("Payment {TransactionReference} marked completed via webhook", flutterwaveId);
+                    }
                 }
             }
         }
 
         return Ok();
+    }
+
+    private static string? ReadText(JsonElement element, string propertyName)
+    {
+        if (!element.TryGetProperty(propertyName, out var value))
+            return null;
+
+        return value.ValueKind switch
+        {
+            JsonValueKind.String => value.GetString(),
+            JsonValueKind.Number => value.GetRawText(),
+            _ => null
+        };
     }
 }
 

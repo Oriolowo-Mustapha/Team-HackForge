@@ -1,3 +1,4 @@
+using FarmHand.Application.Common.Exceptions;
 using FarmHand.Application.Common.Interfaces;
 using FarmHand.Domain.Interfaces;
 using MediatR;
@@ -39,15 +40,14 @@ public class RespondVetRequestCommandHandler : IRequestHandler<RespondVetRequest
         _authorization.EnsureVetOrAdmin();
 
         var vetRequest = await _vetRequestRepository.GetByIdAsync(request.VetRequestId, ct)
-            ?? throw new KeyNotFoundException($"Vet request {request.VetRequestId} not found.");
+            ?? throw PublicException.NotFound("Vet request not found.");
 
         // Pay before visit: a paid vet request must have a completed payment before it is accepted.
         if (vetRequest.FarmerCost.Amount > 0)
         {
             var payments = await _paymentRepository.GetByVetRequestIdAsync(vetRequest.Id, ct);
             if (!payments.Any(p => p.Status == "Completed"))
-                throw new InvalidOperationException(
-                    "Payment must be completed before the vet can accept this request.");
+                throw PublicException.Conflict("Payment must be completed before the vet can accept this request.");
         }
 
         var vetPartnerId = request.VetPartnerId;
@@ -59,10 +59,13 @@ public class RespondVetRequestCommandHandler : IRequestHandler<RespondVetRequest
                 : null;
 
             if (partner is null || !partner.IsActive)
-                throw new UnauthorizedAccessException("No active vet profile is linked to this account.");
+                throw PublicException.Forbidden("No active vet profile is linked to this account.");
+
+            if (vetRequest.VetPartnerId is { } assignedVetId && assignedVetId != partner.Id)
+                throw PublicException.Forbidden("This request is assigned to another vet.");
 
             if (request.VetPartnerId is { } requestedId && requestedId != partner.Id)
-                throw new UnauthorizedAccessException("You can only respond as your own vet profile.");
+                throw PublicException.Forbidden("You can only respond as your own vet profile.");
 
             vetPartnerId = partner.Id;
         }

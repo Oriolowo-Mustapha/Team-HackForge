@@ -1,3 +1,4 @@
+using FarmHand.Application.Common.Exceptions;
 using FarmHand.Application.Common.Interfaces;
 using FarmHand.Domain.Interfaces;
 using MediatR;
@@ -39,33 +40,33 @@ public class RecordPaymentCommandHandler : IRequestHandler<RecordPaymentCommand>
         await _authorization.EnsureVetRequestAccessAsync(request.VetRequestId, ct);
 
         var payment = await _paymentRepository.GetByTransactionReferenceAsync(request.TransactionReference, ct)
-            ?? throw new KeyNotFoundException("Unknown payment reference. Initiate the payment first.");
+            ?? throw PublicException.NotFound("Unknown payment reference. Initiate the payment first.");
 
         if (payment.VetRequestId != request.VetRequestId)
-            throw new ArgumentException("The payment reference belongs to a different vet request.");
+            throw PublicException.BadRequest("The payment reference belongs to a different vet request.");
 
         var currency = request.Currency.Trim().ToUpperInvariant();
 
         // Validate against TotalAmount (vet cost + platform commission)
         if (payment.TotalAmount.Amount != request.Amount || !string.Equals(payment.TotalAmount.Currency, currency, StringComparison.OrdinalIgnoreCase))
-            throw new ArgumentException("Amount or currency does not match the initiated payment.");
+            throw PublicException.BadRequest("Amount or currency does not match the initiated payment.");
 
         if (payment.Status == "Completed")
             return Unit.Value;
 
         if (payment.Status != "Pending")
-            throw new InvalidOperationException($"Payment in status {payment.Status} cannot be completed.");
+            throw PublicException.Conflict("This payment can no longer be completed.");
 
         var verification = await _paymentService.VerifyPaymentAsync(request.TransactionReference, ct);
         if (!verification.Success)
-            throw new InvalidOperationException(verification.ErrorMessage ?? "Payment verification failed.");
+            throw PublicException.Upstream(verification.ErrorMessage ?? "Payment verification failed. Please try again.");
 
         if (verification.Amount is { } verifiedAmount && verifiedAmount != payment.TotalAmount.Amount)
-            throw new InvalidOperationException("Verified amount does not match the initiated payment.");
+            throw PublicException.Conflict("The verified amount does not match the initiated payment.");
 
         if (!string.IsNullOrWhiteSpace(verification.Currency)
             && !string.Equals(verification.Currency, payment.TotalAmount.Currency, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("Verified currency does not match the initiated payment.");
+            throw PublicException.Conflict("The verified currency does not match the initiated payment.");
 
         payment.MarkCompleted(request.TransactionReference);
         await _unitOfWork.SaveChangesAsync(ct);

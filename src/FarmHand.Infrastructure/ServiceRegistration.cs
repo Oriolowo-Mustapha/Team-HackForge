@@ -3,6 +3,7 @@ using FarmHand.Application.Features.Poultry;
 using FarmHand.Domain.Interfaces;
 using FarmHand.Infrastructure.AI.Clients;
 using FarmHand.Infrastructure.AI.Services;
+using FarmHand.Infrastructure.Email;
 using FarmHand.Infrastructure.Payments;
 using FarmHand.Infrastructure.Persistence;
 using FarmHand.Infrastructure.Repositories;
@@ -58,6 +59,7 @@ public static class ServiceRegistration
         services.AddScoped<IIncidentActionRepository, IncidentActionRepository>();
         services.AddScoped<IAuditEventRepository, AuditEventRepository>();
         services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
+        services.AddScoped<IEmailService, SmtpEmailService>();
         services.AddScoped<IDemoDataSeeder, DemoDataSeeder>();
 
         return services;

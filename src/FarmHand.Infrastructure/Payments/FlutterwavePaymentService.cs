@@ -42,6 +42,7 @@ public class FlutterwavePaymentService : IPaymentService
         string currency,
         string customerEmail,
         string? customerName = null,
+        PaymentSplit? split = null,
         CancellationToken ct = default)
     {
         if (amount <= 0)
@@ -62,25 +63,43 @@ public class FlutterwavePaymentService : IPaymentService
 
             using var request = new HttpRequestMessage(HttpMethod.Post, $"{_baseUrl.TrimEnd('/')}/payments");
             request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _secretKey);
-            request.Content = new StringContent(
-                JsonSerializer.Serialize(new
+
+            var payload = new Dictionary<string, object?>
+            {
+                ["tx_ref"] = reference,
+                ["amount"] = amount,
+                ["currency"] = currency.Trim().ToUpperInvariant(),
+                ["redirect_url"] = _redirectUrl,
+                ["customer"] = new
                 {
-                    tx_ref = reference,
-                    amount,
-                    currency = currency.Trim().ToUpperInvariant(),
-                    redirect_url = _redirectUrl,
-                    customer = new
+                    email = customerEmail.Trim(),
+                    name = customerName ?? string.Empty
+                },
+                ["customizations"] = new
+                {
+                    title = "FarmHand",
+                    description = "Vet request payment",
+                    logo = string.Empty
+                }
+            };
+
+            if (split is not null && !string.IsNullOrWhiteSpace(split.SubaccountId))
+            {
+                payload["subaccounts"] = new[]
+                {
+                    new
                     {
-                        email = customerEmail.Trim(),
-                        name = customerName ?? string.Empty
-                    },
-                    customizations = new
-                    {
-                        title = "FarmHand",
-                        description = "Vet request payment",
-                        logo = string.Empty
+                        id = split.SubaccountId,
+                        // The single subaccount receives the remainder after the platform's commission.
+                        transaction_split_ratio = 100,
+                        transaction_charge_type = "percentage",
+                        transaction_charge = Math.Round(split.PlatformCommissionRate, 6)
                     }
-                }),
+                };
+            }
+
+            request.Content = new StringContent(
+                JsonSerializer.Serialize(payload),
                 Encoding.UTF8,
                 "application/json");
 
@@ -205,6 +224,90 @@ public class FlutterwavePaymentService : IPaymentService
     {
         using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(_signingSecret));
         return Convert.ToHexString(hmac.ComputeHash(Encoding.UTF8.GetBytes(payload))).ToLowerInvariant()[..16];
+    }
+
+    public async Task<SubaccountResult> CreateOrUpdateSubaccountAsync(
+        VetSubaccountRequest request,
+        CancellationToken ct = default)
+    {
+        // Simulated provider: derive a stable fake subaccount id so the split flow is testable.
+        if (!_liveMode)
+            return new SubaccountResult(true, $"RS_SIM_{request.VetPartnerId:N}", null);
+
+        if (string.IsNullOrWhiteSpace(_secretKey))
+            return new SubaccountResult(false, null, "Payment provider is not configured.");
+
+        try
+        {
+            var existingSubaccountId = request.ExistingSubaccountId;
+            if (existingSubaccountId?.StartsWith("RS_SIM_", StringComparison.OrdinalIgnoreCase) == true)
+                existingSubaccountId = null;
+
+            var isUpdate = !string.IsNullOrWhiteSpace(existingSubaccountId);
+            var url = isUpdate
+                ? $"{_baseUrl.TrimEnd('/')}/subaccounts/{existingSubaccountId}"
+                : $"{_baseUrl.TrimEnd('/')}/subaccounts";
+
+            using var httpRequest = new HttpRequestMessage(isUpdate ? HttpMethod.Put : HttpMethod.Post, url);
+            httpRequest.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _secretKey);
+            httpRequest.Content = new StringContent(
+                JsonSerializer.Serialize(new
+                {
+                    account_bank = request.BankCode.Trim(),
+                    account_number = request.AccountNumber.Trim(),
+                    business_name = request.BusinessName.Trim(),
+                    business_email = request.Email.Trim(),
+                    business_contact = request.BusinessName.Trim(),
+                    business_mobile = request.Contact.Trim(),
+                    business_contact_mobile = request.Contact.Trim(),
+                    country = request.Country.Trim().ToUpperInvariant(),
+                    split_type = "percentage",
+                    // Platform commission is 5% of the vet charge, i.e. ~4.76% of the total charge.
+                    // Each payment overrides this with the exact rate.
+                    split_value = 0.047619
+                }),
+                Encoding.UTF8,
+                "application/json");
+
+            var response = await _httpClient.SendAsync(httpRequest, ct);
+            var body = await response.Content.ReadAsStringAsync(ct);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("Flutterwave subaccount request failed with {StatusCode}", response.StatusCode);
+                return new SubaccountResult(false, null, "The payout account could not be verified with the payment provider.");
+            }
+
+            if (isUpdate)
+                return new SubaccountResult(true, existingSubaccountId, null);
+
+            using var doc = JsonDocument.Parse(body);
+            if (!doc.RootElement.TryGetProperty("data", out var data))
+                return new SubaccountResult(false, null, "The payment provider did not return a subaccount id.");
+
+            var subaccountId = ReadIdentifier(data, "id") ?? ReadIdentifier(data, "subaccount_id");
+            return string.IsNullOrWhiteSpace(subaccountId)
+                ? new SubaccountResult(false, null, "The payment provider did not return a subaccount id.")
+                : new SubaccountResult(true, subaccountId, null);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Flutterwave subaccount error");
+            return new SubaccountResult(false, null, "The payment provider is unavailable.", true);
+        }
+    }
+
+    private static string? ReadIdentifier(JsonElement data, string propertyName)
+    {
+        if (!data.TryGetProperty(propertyName, out var element))
+            return null;
+
+        return element.ValueKind switch
+        {
+            JsonValueKind.String => element.GetString(),
+            JsonValueKind.Number => element.GetRawText(),
+            _ => null
+        };
     }
 
     public bool VerifyWebhookSignature(string rawBody, string? flutterwaveSignature, string? verifHash, string secretHash)
