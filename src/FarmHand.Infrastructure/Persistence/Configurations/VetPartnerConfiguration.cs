@@ -10,7 +10,15 @@ public class VetPartnerConfiguration : IEntityTypeConfiguration<VetPartner>
     {
         builder.HasKey(x => x.Id);
         builder.Property(x => x.Name).IsRequired().HasMaxLength(100);
+        builder.Property(x => x.Email).IsRequired().HasMaxLength(255);
         builder.Property(x => x.Specialization).HasMaxLength(100);
         builder.Property(x => x.Contact).HasMaxLength(200);
+        builder.HasIndex(x => x.UserId).IsUnique();
+        builder.HasIndex(x => x.Email).IsUnique();
+
+        builder.HasOne<User>()
+            .WithMany()
+            .HasForeignKey(x => x.UserId)
+            .OnDelete(DeleteBehavior.SetNull);
     }
 }

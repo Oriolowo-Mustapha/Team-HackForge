@@ -14,19 +14,24 @@ public class ConfirmObservationCommandHandler : IRequestHandler<ConfirmObservati
 {
     private readonly IPoultryObservationRepository _observationRepository;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly IResourceAuthorizationService _authorization;
 
     public ConfirmObservationCommandHandler(
         IPoultryObservationRepository observationRepository,
-        IUnitOfWork unitOfWork)
+        IUnitOfWork unitOfWork,
+        IResourceAuthorizationService authorization)
     {
         _observationRepository = observationRepository;
         _unitOfWork = unitOfWork;
+        _authorization = authorization;
     }
 
     public async Task<Unit> Handle(ConfirmObservationCommand request, CancellationToken ct)
     {
         var observation = await _observationRepository.GetByIdAsync(request.ObservationId, ct)
             ?? throw new KeyNotFoundException($"Observation {request.ObservationId} not found.");
+
+        await _authorization.EnsureFarmAccessAsync(observation.FarmId, ct);
 
         observation.Confirm(request.CorrectedNotes);
         await _unitOfWork.SaveChangesAsync(ct);

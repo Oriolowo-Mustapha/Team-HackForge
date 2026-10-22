@@ -1,11 +1,12 @@
+using FarmHand.Application.Common.Interfaces;
 using FarmHand.Domain.Entities;
 using FarmHand.Domain.Interfaces;
 using MediatR;
 
 namespace FarmHand.Application.Features.Goats;
 
-/// <summary>Creates a livestock record. The handler adds it to the EF context but does not call SaveChanges.</summary>
-/// <param name="FarmId">Owning farm id.</param>
+/// <summary>Creates a livestock record.</summary>
+/// <param name="FarmId">Owning farm id; must belong to the caller.</param>
 /// <param name="CategoryId">Livestock category id (e.g. Poultry, Goats).</param>
 /// <param name="Species">Species, for example "goat".</param>
 /// <param name="AnimalName">Animal name or tag.</param>
@@ -22,24 +23,39 @@ public record CreateLivestockRecordCommand(
 public class CreateLivestockRecordCommandHandler : IRequestHandler<CreateLivestockRecordCommand, Guid>
 {
     private readonly ILivestockAnimalRepository _livestockRepository;
+    private readonly IUnitOfWork _unitOfWork;
+    private readonly IResourceAuthorizationService _authorization;
 
-    public CreateLivestockRecordCommandHandler(ILivestockAnimalRepository livestockRepository)
+    public CreateLivestockRecordCommandHandler(
+        ILivestockAnimalRepository livestockRepository,
+        IUnitOfWork unitOfWork,
+        IResourceAuthorizationService authorization)
     {
         _livestockRepository = livestockRepository;
+        _unitOfWork = unitOfWork;
+        _authorization = authorization;
     }
 
     public async Task<Guid> Handle(CreateLivestockRecordCommand request, CancellationToken ct)
     {
+        await _authorization.EnsureFarmAccessAsync(request.FarmId, ct);
+
+        var category = await _unitOfWork.LivestockCategories.GetByIdAsync(request.CategoryId, ct)
+            ?? throw new KeyNotFoundException($"Category {request.CategoryId} not found.");
+        if (category.FarmId != request.FarmId)
+            throw new ArgumentException("The selected category does not belong to this farm.");
+
         var record = new LivestockAnimal(
             request.FarmId,
             request.CategoryId,
             request.AnimalName,
             request.Species,
-            null, // breed
+            null,
             request.ApproximateAge,
             request.Sex);
 
         await _livestockRepository.AddAsync(record, ct);
+        await _unitOfWork.SaveChangesAsync(ct);
         return record.Id;
     }
 }
@@ -50,7 +66,9 @@ public class CreateLivestockRecordCommandValidator : AbstractValidator<CreateLiv
     {
         RuleFor(x => x.FarmId).NotEqual(Guid.Empty);
         RuleFor(x => x.CategoryId).NotEqual(Guid.Empty);
-        RuleFor(x => x.Species).NotEmpty();
-        RuleFor(x => x.AnimalName).NotEmpty();
+        RuleFor(x => x.Species).NotEmpty().MaximumLength(50);
+        RuleFor(x => x.AnimalName).NotEmpty().MaximumLength(100);
+        RuleFor(x => x.Sex).NotEmpty().MaximumLength(20);
+        RuleFor(x => x.ApproximateAge).GreaterThanOrEqualTo(0).When(x => x.ApproximateAge is not null);
     }
 }

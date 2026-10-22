@@ -22,8 +22,8 @@ public class FarmsController : ControllerBase
 
     /// <summary>Create a farm.</summary>
     /// <remarks>
-    /// OwnerId is currently taken from the request body. Until it is derived from the
-    /// authenticated principal, callers can create farms for any owner.
+    /// The farm owner is always the authenticated caller; an owner id cannot be supplied
+    /// in the request body.
     /// </remarks>
     /// <param name="command">Farm details to persist.</param>
     /// <param name="ct">Cancellation token.</param>
@@ -45,6 +45,7 @@ public class FarmsController : ControllerBase
     /// <param name="ct">Cancellation token.</param>
     /// <response code="200">Dashboard aggregated from the farm's incidents.</response>
     /// <response code="401">Missing or invalid bearer token.</response>
+    /// <response code="403">The caller does not own this farm.</response>
     /// <response code="404">Farm not found.</response>
     [HttpGet("{farmId}/dashboard")]
     [ProducesResponseType(typeof(DashboardDto), StatusCodes.Status200OK)]

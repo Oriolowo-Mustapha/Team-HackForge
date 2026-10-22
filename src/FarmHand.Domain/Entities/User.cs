@@ -35,6 +35,12 @@ public class User : BaseEntity
         MarkUpdated();
     }
 
+    public void AssignFarm(Guid farmId)
+    {
+        FarmId = farmId;
+        MarkUpdated();
+    }
+
     public void Deactivate()
     {
         IsActive = false;

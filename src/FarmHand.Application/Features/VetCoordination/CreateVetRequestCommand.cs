@@ -6,7 +6,7 @@ using MediatR;
 
 namespace FarmHand.Application.Features.VetCoordination;
 
-/// <summary>Creates a vet request for an incident.</summary>
+/// <summary>Creates a vet request for an incident owned by the caller.</summary>
 /// <param name="IncidentId">Incident id; must match the route value.</param>
 /// <param name="RequestType">Coordination model, sent as an integer (0-2).</param>
 /// <param name="FarmerCost">Farmer's share of the cost, in NGN.</param>
@@ -19,17 +19,22 @@ public class CreateVetRequestCommandHandler : IRequestHandler<CreateVetRequestCo
 {
     private readonly IVetRequestRepository _vetRequestRepository;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly IResourceAuthorizationService _authorization;
 
     public CreateVetRequestCommandHandler(
         IVetRequestRepository vetRequestRepository,
-        IUnitOfWork unitOfWork)
+        IUnitOfWork unitOfWork,
+        IResourceAuthorizationService authorization)
     {
         _vetRequestRepository = vetRequestRepository;
         _unitOfWork = unitOfWork;
+        _authorization = authorization;
     }
 
     public async Task<Guid> Handle(CreateVetRequestCommand request, CancellationToken ct)
     {
+        await _authorization.EnsureIncidentAccessAsync(request.IncidentId, ct);
+
         var vetRequest = new VetRequest(
             request.IncidentId,
             request.RequestType,
@@ -47,6 +52,7 @@ public class CreateVetRequestCommandValidator : AbstractValidator<CreateVetReque
     public CreateVetRequestCommandValidator()
     {
         RuleFor(x => x.IncidentId).NotEqual(Guid.Empty);
+        RuleFor(x => x.RequestType).IsInEnum();
         RuleFor(x => x.FarmerCost).GreaterThanOrEqualTo(0);
     }
 }

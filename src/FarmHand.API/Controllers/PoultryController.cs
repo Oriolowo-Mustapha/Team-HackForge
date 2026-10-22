@@ -22,9 +22,10 @@ public class PoultryController : ControllerBase
     /// <summary>Record a poultry observation from free text.</summary>
     /// <remarks>
     /// The raw text is sent to Gemini (falling back to Groq) for structured extraction.
-    /// idempotencyKey is required by validation but is not yet persisted or used for de-duplication.
+    /// Reusing an idempotency key returns the existing observation id.
+    /// Exactly one of LivestockAnimalId or LivestockCategoryId must be supplied.
     /// </remarks>
-    /// <param name="command">Flock id, raw farmer text, idempotency key, and optional image URL.</param>
+    /// <param name="command">Animal or category id, raw farmer text, idempotency key, and optional image/vision data.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <response code="202">Observation accepted. The body contains the new observation id.</response>
     /// <response code="400">Request validation failed.</response>

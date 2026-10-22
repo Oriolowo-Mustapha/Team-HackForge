@@ -1,6 +1,8 @@
 using FarmHand.Application.Common.Interfaces;
+using FarmHand.Application.Features.Incidents;
 using FarmHand.Application.Features.Poultry;
 using FarmHand.Domain.Enums;
+using FarmHand.Domain.Interfaces;
 using FarmHand.Infrastructure.Services;
 using MediatR;
 using Microsoft.AspNetCore.Authorization;
@@ -19,6 +21,8 @@ public class ChatController : ControllerBase
     private readonly IVisionAnalysisService _visionService;
     private readonly ICloudinaryService _cloudinary;
     private readonly YarnGptService _yarnGpt;
+    private readonly IPoultryObservationRepository _observationRepository;
+    private readonly IResourceAuthorizationService _authorization;
     private readonly ILogger<ChatController> _logger;
 
     public ChatController(
@@ -27,6 +31,8 @@ public class ChatController : ControllerBase
         IVisionAnalysisService visionService,
         ICloudinaryService cloudinary,
         YarnGptService yarnGpt,
+        IPoultryObservationRepository observationRepository,
+        IResourceAuthorizationService authorization,
         ILogger<ChatController> logger)
     {
         _mediator = mediator;
@@ -34,147 +40,169 @@ public class ChatController : ControllerBase
         _visionService = visionService;
         _cloudinary = cloudinary;
         _yarnGpt = yarnGpt;
+        _observationRepository = observationRepository;
+        _authorization = authorization;
         _logger = logger;
     }
 
     /// <summary>
-    /// Chat observation: farmer submits text/voice/image observation via AI.
-    /// Returns structured observation data WITHOUT creating an incident.
-    /// The farmer can review, correct, and then choose to save or create an incident.
+    /// Create a pending observation from chat text, voice, and/or image input.
     /// </summary>
+    /// <remarks>
+    /// The server extracts and stores the observation in Pending state. The response returns
+    /// the observation id; call the confirm endpoint after the farmer reviews it. Confirming
+    /// does not create an incident.
+    /// </remarks>
+    /// <response code="202">Pending observation created.</response>
+    /// <response code="400">No useful input or animal/category missing.</response>
+    /// <response code="401">Missing or invalid bearer token.</response>
+    /// <response code="403">The farm or animal belongs to another user.</response>
+    /// <response code="404">The farm, animal, or category was not found.</response>
     [HttpPost("observation")]
+    [ProducesResponseType(StatusCodes.Status202Accepted)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> ChatObservation(
         [FromForm] ChatObservationRequest request,
         CancellationToken ct = default)
     {
+        if (request.FarmId == Guid.Empty)
+            return BadRequest(new { error = "Farm id is required." });
+
+        if (request.LivestockAnimalId is null && request.LivestockCategoryId is null)
+            return BadRequest(new { error = "Provide either a livestock animal or a category." });
+
+        var key = string.IsNullOrWhiteSpace(request.IdempotencyKey)
+            ? Guid.NewGuid().ToString("N")
+            : request.IdempotencyKey.Trim();
+
         string? transcript = request.RawText;
+
+        if (request.AudioFile is { Length: > 0 })
+        {
+            using var audioStream = request.AudioFile.OpenReadStream();
+            var sttResult = await _yarnGpt.TranscribeAudioAsync(audioStream, request.AudioFile.FileName, key, ct);
+            transcript = sttResult.Transcript;
+            _logger.LogInformation("Chat STT completed");
+        }
+
+        if (string.IsNullOrWhiteSpace(transcript))
+            return BadRequest(new { error = "No text or audio provided." });
+
         string? imageUrl = null;
-        string? visionAnalysis = null;
-        string? idempotencyKey = Guid.NewGuid().ToString();
+        string? visionAnalysisJson = null;
 
-        try
+        if (request.ImageFile is { Length: > 0 })
         {
-            // 1. Handle voice input via YarnGPT STT
-            if (request.AudioFile != null && request.AudioFile.Length > 0)
+            using var imageStream = request.ImageFile.OpenReadStream();
+            var uploadResult = await _cloudinary.UploadImageAsync(imageStream, request.ImageFile.FileName, "farmhand/observations", ct);
+            imageUrl = uploadResult.SecureUrl;
+
+            var vision = await _visionService.AnalyzeImageAsync(imageUrl, transcript, ct);
+            visionAnalysisJson = System.Text.Json.JsonSerializer.Serialize(new
             {
-                using var audioStream = request.AudioFile.OpenReadStream();
-                var sttResult = await _yarnGpt.TranscribeAudioAsync(audioStream, request.AudioFile.FileName, idempotencyKey, ct);
-                transcript = sttResult.Transcript;
-                _logger.LogInformation("Chat STT completed");
-            }
-
-            if (string.IsNullOrWhiteSpace(transcript))
-                return BadRequest(new { error = "No text or audio provided." });
-
-            // 2. Handle image upload via Cloudinary + Groq Vision
-            if (request.ImageFile != null && request.ImageFile.Length > 0)
-            {
-                using var imageStream = request.ImageFile.OpenReadStream();
-                var uploadResult = await _cloudinary.UploadImageAsync(imageStream, request.ImageFile.FileName, "farmhand/observations", ct);
-                imageUrl = uploadResult.SecureUrl;
-
-                var vision = await _visionService.AnalyzeImageAsync(imageUrl, request.RawText, ct);
-                visionAnalysis = System.Text.Json.JsonSerializer.Serialize(new
-                {
-                    vision.Description,
-                    vision.DetectedIssues,
-                    vision.Confidence,
-                    AnalyzedAt = DateTime.UtcNow
-                });
-            }
-
-            // 3. Extract structured observation via Gemini (no incident created yet)
-            var extracted = await _aiService.ExtractObservationAsync(transcript ?? request.RawText, ct);
-
-            // Range validation
-            if (extracted.MortalityCount < 0 || extracted.MortalityCount > 10000)
-                return BadRequest(new { error = "Invalid mortality count extracted." });
-
-            // 4. Return structured observation for farmer review - NO incident created yet
-            var observationPreview = new
-            {
-                idempotencyKey,
-                request.LivestockAnimalId,
-                request.LivestockCategoryId,
-                transcript,
-                imageUrl,
-                visionAnalysis = visionAnalysis != null ? System.Text.Json.JsonSerializer.Deserialize<object>(visionAnalysis) : null,
-                extracted = new
-                {
-                    extracted.MortalityCount,
-                    extracted.WaterConsumption,
-                    extracted.FeedConsumption,
-                    extracted.EggProduction,
-                    extracted.FarmerNotes
-                },
-                message = "Observation extracted. Review and confirm to save, or create an incident if concerning."
-            };
-
-            return Ok(observationPreview);
+                vision.Description,
+                vision.DetectedIssues,
+                vision.Confidence,
+                AnalyzedAt = DateTime.UtcNow
+            });
         }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Chat observation failed");
-            return StatusCode(500, new { error = "Observation processing failed. Please try again." });
-        }
-    }
 
-    /// <summary>
-    /// Confirm and save a chat observation. Creates the PoultryObservation record.
-    /// Does NOT create an incident - that's a separate step.
-    /// </summary>
-    [HttpPost("observation/confirm")]
-    public async Task<IActionResult> ConfirmObservation(
-        [FromBody] ConfirmChatObservationRequest request,
-        CancellationToken ct)
-    {
         var command = new RecordObservationCommand(
+            request.FarmId,
             request.LivestockAnimalId,
             request.LivestockCategoryId,
-            request.RawText,
-            request.IdempotencyKey,
-            request.ImageUrl,
-            new ExtractedObservation(
-                request.MortalityCount,
-                request.WaterConsumption,
-                request.FeedConsumption,
-                request.EggProduction,
-                request.FarmerNotes),
-            PreAnalyzedVisionJson: request.VisionAnalysisJson);
+            transcript,
+            key,
+            imageUrl,
+            PreAnalyzedVisionJson: visionAnalysisJson);
 
         var observationId = await _mediator.Send(command, ct);
 
-        return CreatedAtAction(nameof(ConfirmObservation), new { }, new
+        return Accepted(new
         {
             observationId,
-            message = "Observation saved. You can now create an incident if this needs vet attention."
+            status = nameof(ObservationConfirmationStatus.Pending),
+            request.FarmId,
+            request.LivestockAnimalId,
+            request.LivestockCategoryId,
+            transcript,
+            imageUrl,
+            visionAnalysis = visionAnalysisJson is null ? null : System.Text.Json.JsonSerializer.Deserialize<object>(visionAnalysisJson),
+            message = "Observation saved as pending. Review and confirm it, then optionally create an incident."
         });
     }
 
+    /// <summary>Confirm a pending chat observation.</summary>
+    /// <remarks>Only the observation id and optional corrected notes are trusted. Does not create an incident.</remarks>
+    /// <response code="200">Observation confirmed.</response>
+    /// <response code="401">Missing or invalid bearer token.</response>
+    /// <response code="403">The observation belongs to another user.</response>
+    /// <response code="404">Observation not found.</response>
+    [HttpPost("observation/{observationId}/confirm")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> ConfirmObservation(
+        Guid observationId,
+        [FromBody] ConfirmChatObservationRequest request,
+        CancellationToken ct)
+    {
+        await _mediator.Send(new ConfirmObservationCommand(observationId, request.CorrectedNotes), ct);
+        return Ok(new { observationId, status = nameof(ObservationConfirmationStatus.Confirmed) });
+    }
+
     /// <summary>
-    /// Create an incident from a confirmed observation. Only call this if the observation
-    /// indicates a concerning issue that needs vet attention.
+    /// Create an incident from a confirmed observation.
     /// </summary>
+    /// <remarks>
+    /// Farm, animal, and category are derived from the stored observation, not from the request.
+    /// The observation must be confirmed first.
+    /// </remarks>
+    /// <response code="201">Incident created.</response>
+    /// <response code="401">Missing or invalid bearer token.</response>
+    /// <response code="403">The observation belongs to another user.</response>
+    /// <response code="404">Observation not found.</response>
+    /// <response code="409">Observation has not been confirmed.</response>
     [HttpPost("observation/{observationId}/create-incident")]
+    [ProducesResponseType(StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> CreateIncidentFromObservation(
         Guid observationId,
         [FromBody] CreateIncidentFromObservationRequest request,
         CancellationToken ct)
     {
-        // This would load the observation and create an incident from it
-        // For now, delegate to the incidents controller logic via MediatR
-        var command = new FarmHand.Application.Features.Incidents.CreateIncidentCommand(
-            request.FarmId,
-            observationId, // Using observationId as a reference - in production you'd look up the flock/animal
-            "Poultry Observation",
+        var observation = await _observationRepository.GetByIdAsync(observationId, ct)
+            ?? throw new KeyNotFoundException($"Observation {observationId} not found.");
+
+        await _authorization.EnsureFarmAccessAsync(observation.FarmId, ct);
+
+        if (observation.ConfirmationStatus == ObservationConfirmationStatus.Pending)
+            throw new InvalidOperationException("Confirm the observation before creating an incident.");
+
+        var command = new CreateIncidentCommand(
+            observation.FarmId,
+            observation.LivestockAnimalId,
+            observation.LivestockCategoryId,
+            string.IsNullOrWhiteSpace(request.IncidentType) ? "Poultry Observation" : request.IncidentType,
             request.Severity,
-            request.TriggeringObservations,
-            request.EvidenceSummary,
+            string.IsNullOrWhiteSpace(request.TriggeringObservations)
+                ? $"Observation {observation.Id}"
+                : request.TriggeringObservations,
+            string.IsNullOrWhiteSpace(request.EvidenceSummary)
+                ? $"Mortality: {observation.MortalityCount}; notes: {observation.FarmerNotes}"
+                : request.EvidenceSummary,
             request.RuleVersion);
 
         var incidentId = await _mediator.Send(command, ct);
 
-        return CreatedAtAction(nameof(CreateIncidentFromObservation), new { }, new
+        return CreatedAtAction(nameof(CreateIncidentFromObservation), new { observationId }, new
         {
             incidentId,
             message = "Incident created from observation. Vet attention recommended."
@@ -182,29 +210,20 @@ public class ChatController : ControllerBase
     }
 }
 
-public record ConfirmChatObservationRequest(
-    Guid LivestockAnimalId,
-    Guid? LivestockCategoryId,
-    string RawText,
-    string IdempotencyKey,
-    string? ImageUrl,
-    int MortalityCount,
-    string? WaterConsumption,
-    string? FeedConsumption,
-    string? EggProduction,
-    string? FarmerNotes,
-    string? VisionAnalysisJson);
+public record ConfirmChatObservationRequest(string? CorrectedNotes);
 
 public record CreateIncidentFromObservationRequest(
-    Guid FarmId,
-    Domain.Enums.Severity Severity,
-    string TriggeringObservations,
-    string EvidenceSummary,
+    Severity Severity,
+    string? IncidentType = null,
+    string? TriggeringObservations = null,
+    string? EvidenceSummary = null,
     string? RuleVersion = null);
 
 public record ChatObservationRequest(
+    Guid FarmId,
     string RawText,
-    Guid LivestockAnimalId,
+    Guid? LivestockAnimalId,
     Guid? LivestockCategoryId,
+    string? IdempotencyKey = null,
     IFormFile? AudioFile = null,
     IFormFile? ImageFile = null);

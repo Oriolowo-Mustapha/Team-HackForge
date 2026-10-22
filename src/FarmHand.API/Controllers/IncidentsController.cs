@@ -55,7 +55,7 @@ public class IncidentsController : ControllerBase
     /// <summary>Transition an incident to a new status.</summary>
     /// <remarks>
     /// Send the numeric IncidentStatus value (see API.md). The route id and body IncidentId must match.
-    /// Known issue: Open/unknown values are silently ignored and still return 200.
+    /// Open (0) and unknown values are rejected with 400.
     /// </remarks>
     /// <param name="incidentId">Incident id; must equal the body IncidentId.</param>
     /// <param name="command">Target status and optional follow-up date.</param>

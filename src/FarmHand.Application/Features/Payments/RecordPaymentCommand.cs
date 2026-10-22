@@ -1,51 +1,72 @@
 using FarmHand.Application.Common.Interfaces;
-using FarmHand.Domain.Entities;
 using FarmHand.Domain.Interfaces;
 using MediatR;
 
 namespace FarmHand.Application.Features.Payments;
 
-/// <summary>Records a payment after verifying the reference with the payment provider.</summary>
+/// <summary>Verifies a pending payment reference and marks the payment completed.</summary>
 /// <param name="VetRequestId">Vet request being paid for.</param>
-/// <param name="Amount">Amount in NGN; must be greater than zero.</param>
-/// <param name="TransactionReference">Provider reference; verified before the payment is marked completed.</param>
+/// <param name="Amount">Amount in NGN; must match the initiated payment.</param>
+/// <param name="Currency">ISO currency code; defaults to NGN.</param>
+/// <param name="TransactionReference">Provider reference created by the initiate endpoint.</param>
 public record RecordPaymentCommand(
     Guid VetRequestId,
     decimal Amount,
-    string TransactionReference) : IRequest;
+    string TransactionReference,
+    string Currency = "NGN") : IRequest;
 
 public class RecordPaymentCommandHandler : IRequestHandler<RecordPaymentCommand>
 {
     private readonly IPaymentRepository _paymentRepository;
     private readonly IPaymentService _paymentService;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly IResourceAuthorizationService _authorization;
 
     public RecordPaymentCommandHandler(
         IPaymentRepository paymentRepository,
         IPaymentService paymentService,
-        IUnitOfWork unitOfWork)
+        IUnitOfWork unitOfWork,
+        IResourceAuthorizationService authorization)
     {
         _paymentRepository = paymentRepository;
         _paymentService = paymentService;
         _unitOfWork = unitOfWork;
+        _authorization = authorization;
     }
 
     public async Task<Unit> Handle(RecordPaymentCommand request, CancellationToken ct)
     {
-        // Verify with payment provider before marking as completed
+        await _authorization.EnsureVetRequestAccessAsync(request.VetRequestId, ct);
+
+        var payment = await _paymentRepository.GetByTransactionReferenceAsync(request.TransactionReference, ct)
+            ?? throw new KeyNotFoundException("Unknown payment reference. Initiate the payment first.");
+
+        if (payment.VetRequestId != request.VetRequestId)
+            throw new ArgumentException("The payment reference belongs to a different vet request.");
+
+        var currency = request.Currency.Trim().ToUpperInvariant();
+
+        if (payment.Amount.Amount != request.Amount || !string.Equals(payment.Amount.Currency, currency, StringComparison.OrdinalIgnoreCase))
+            throw new ArgumentException("Amount or currency does not match the initiated payment.");
+
+        if (payment.Status == "Completed")
+            return Unit.Value;
+
+        if (payment.Status != "Pending")
+            throw new InvalidOperationException($"Payment in status {payment.Status} cannot be completed.");
+
         var verification = await _paymentService.VerifyPaymentAsync(request.TransactionReference, ct);
         if (!verification.Success)
-        {
-            throw new InvalidOperationException($"Payment verification failed: {verification.ErrorMessage}");
-        }
+            throw new InvalidOperationException(verification.ErrorMessage ?? "Payment verification failed.");
 
-        var payment = new Payment(
-            request.VetRequestId,
-            new Domain.ValueObjects.Money(request.Amount));
+        if (verification.Amount is { } verifiedAmount && verifiedAmount != payment.Amount.Amount)
+            throw new InvalidOperationException("Verified amount does not match the initiated payment.");
+
+        if (!string.IsNullOrWhiteSpace(verification.Currency)
+            && !string.Equals(verification.Currency, payment.Amount.Currency, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Verified currency does not match the initiated payment.");
 
         payment.MarkCompleted(request.TransactionReference);
-
-        await _paymentRepository.AddAsync(payment, ct);
         await _unitOfWork.SaveChangesAsync(ct);
         return Unit.Value;
     }
@@ -57,6 +78,7 @@ public class RecordPaymentCommandValidator : AbstractValidator<RecordPaymentComm
     {
         RuleFor(x => x.VetRequestId).NotEqual(Guid.Empty);
         RuleFor(x => x.Amount).GreaterThan(0);
-        RuleFor(x => x.TransactionReference).NotEmpty();
+        RuleFor(x => x.Currency).NotEmpty().Length(3).MaximumLength(10);
+        RuleFor(x => x.TransactionReference).NotEmpty().MaximumLength(200);
     }
 }

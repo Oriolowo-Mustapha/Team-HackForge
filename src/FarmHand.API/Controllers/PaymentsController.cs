@@ -1,5 +1,4 @@
 using FarmHand.Application.Features.Payments;
-using FarmHand.Application.Common.Interfaces;
 using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -14,60 +13,62 @@ namespace FarmHand.API.Controllers;
 public class PaymentsController : ControllerBase
 {
     private readonly IMediator _mediator;
-    private readonly IPaymentService _paymentService;
 
-    public PaymentsController(IMediator mediator, IPaymentService paymentService)
+    public PaymentsController(IMediator mediator)
     {
         _mediator = mediator;
-        _paymentService = paymentService;
     }
 
     /// <summary>Initiate a payment and obtain a transaction reference.</summary>
     /// <remarks>
-    /// Runs against the Nomba integration configured under <c>Nomba</c>. The reference must be
-    /// passed to <c>POST /api/payments/record</c> after the payer completes payment.
+    /// Creates a pending payment owned by the caller and obtains a reference from Nomba
+    /// (or the signed sandbox reference when <c>Nomba:Mode</c> is not <c>Live</c>).
+    /// The reference must be passed to <c>POST /api/payments/record</c> after payment.
     /// </remarks>
     /// <param name="request">Vet request, amount, and currency.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <response code="200">Reference created; body contains <c>transactionReference</c>.</response>
     /// <response code="400">Provider rejected the initiation request.</response>
     /// <response code="401">Missing or invalid bearer token.</response>
+    /// <response code="403">The vet request belongs to another farm.</response>
+    /// <response code="404">Vet request not found.</response>
     [HttpPost("initiate")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> InitiatePayment(
         [FromBody] InitiatePaymentRequest request,
         CancellationToken ct)
     {
-        var result = await _paymentService.InitiatePaymentAsync(
-            request.VetRequestId,
-            request.Amount,
-            request.Currency,
+        var reference = await _mediator.Send(
+            new InitiatePaymentCommand(request.VetRequestId, request.Amount, request.Currency),
             ct);
 
-        if (!result.Success)
-            return BadRequest(new { error = result.ErrorMessage });
-
-        return Ok(new { transactionReference = result.TransactionReference });
+        return Ok(new { transactionReference = reference });
     }
 
     /// <summary>Verify a payment with the provider and record it.</summary>
     /// <remarks>
-    /// Calls the provider's verification endpoint before marking the payment completed. If
-    /// <c>Nomba:ApiKey</c> is missing, verification fails and the request returns 500.
+    /// The reference must already exist as a pending payment for this vet request. Amount and
+    /// currency must match the initiated payment. Repeating a successful record is idempotent.
     /// </remarks>
-    /// <param name="command">Vet request, amount, and provider transaction reference.</param>
+    /// <param name="command">Vet request, amount, currency, and provider reference.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <response code="200">Payment verified and recorded.</response>
-    /// <response code="400">Request validation failed.</response>
+    /// <response code="400">Validation failed or amount/currency mismatch.</response>
     /// <response code="401">Missing or invalid bearer token.</response>
-    /// <response code="500">Provider verification failed or was not configured.</response>
+    /// <response code="403">The vet request belongs to another farm.</response>
+    /// <response code="404">Payment reference or vet request not found.</response>
+    /// <response code="409">Payment could not be completed.</response>
     [HttpPost("record")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> RecordPayment(
         [FromBody] RecordPaymentCommand command,
         CancellationToken ct)

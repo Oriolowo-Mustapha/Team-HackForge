@@ -1,190 +1,321 @@
-# FarmHand — Codebase Audit
+# FarmHand Code Audit — v2
 
-**Date:** 2026-10-21
-**Repository:** `Team-HackForge` (branch `master`, HEAD `bda24b7`)
-**Scope:** 141 tracked files — .NET Clean Architecture (Domain / Application / Infrastructure / API) with CQRS + MediatR. All source, configuration, migrations, tests, and git history reviewed.
-**Method:** Static review plus `dotnet build` verification on the local toolchain.
+**Repository:** Team-HackForge
+**Commit audited:** `3230f5f` (`master`, clean working tree)
+**Date:** 2026-10-22
+**Scope:** API, Application, Domain, Infrastructure, migrations, configuration, tests
+**Method:** Static review of all C# sources and project files, plus `dotnet build FarmHand.slnx` (0 warnings, 0 errors) and `dotnet test` (2 placeholder tests pass).
 
-**Verdict:** **Request changes — not runnable as committed, and has critical authentication and payment-integrity gaps.** The architectural skeleton is solid; runtime wiring and security are unfinished.
+---
 
-| Area | Score | Note |
+## Verdict
+
+The architecture is sound and the merge fixed several v1 findings: real bcrypt login, JWT fail-fast, enforced idempotency lookup, signed Cloudinary requests, EF foreign keys, and DI registration. However, the **primary ingestion paths are broken end-to-end**, authorization is still authentication-only, and the payment and admin workflows cannot complete. This is not demo-ready without the critical fixes below.
+
+| Severity | Count |
+|---|---|
+| Critical | 9 |
+| High | 11 |
+| Medium | 12 |
+| Low | 8 |
+
+---
+
+## Fixed since v1
+
+- Token issuance now exists with bcrypt verification (`AuthController`, `DemoDataSeeder` aside).
+- Program fails fast when `Jwt:SecretKey` is missing; the hardcoded fallback was removed from `Program.cs`.
+- Observation idempotency keys are persisted and looked up.
+- Cloudinary uploads now attempt request signing (the signature is still incorrect, C8).
+- `IVisionAnalysisService` / `IGroqVisionService` / `IDemoDataSeeder` are registered.
+- FK constraints and unique indexes added for farms, livestock, observations, incidents, vet requests, payments.
+- Global exception handler prevents raw exception text from reaching clients.
+- Swagger/OpenAPI and `API.md` delivered.
+
+---
+
+## Critical issues
+
+### C1. Voice and image check-ins always fail validation and FK constraints
+
+`VoiceController.cs:85-90`, `VoiceController.cs:180-187`, `RecordObservationCommand.cs:112`, `PoultryObservationConfiguration.cs:24-27`
+
+Both endpoints send `Guid.Empty` as `LivestockAnimalId` and `null` as `LivestockCategoryId`. The validator requires a non-empty animal when the category is null, so FluentValidation throws; if it did not, `PoultryObservations.LivestockAnimalId` is a required FK, so the insert would fail. The flagship voice feature returns 500 on every request.
+
+**Fix:** make `LivestockAnimalId` nullable (or model flock-level observations with a required `FlockId`/category), update the validator, the FK, and the migration; or resolve the category/animal from the request (`flockId` is currently accepted but discarded).
+
+### C2. Chat incident creation writes an observation id into `FlockId`
+
+`ChatController.cs:169-178`
+
+`CreateIncidentFromObservation` passes `observationId` as the `flockId` argument, with a comment acknowledging it. `Incidents.FlockId` has an FK to `Flock`, so the insert fails with a 500. There is also no lookup of the observation, farm, or ownership.
+
+**Fix:** load the observation and its animal/category, derive the farm and flock/animal from it, validate ownership, then create the incident.
+
+### C3. Incidents require a `Flock` that nothing can create
+
+`IncidentConfiguration.cs:24-27`, migration `20261021213428_LivestockRestructure.cs`, `DemoDataSeeder.cs`
+
+The livestock restructure moved observations to `LivestockAnimal`/`LivestockCategory`, but incidents still require a `Flock`. There is no Flock repository, controller, endpoint, or seed row. Consequently, clients cannot obtain a valid `flockId`, and every incident creation is a guess.
+
+**Fix:** migrate incidents to `LivestockAnimalId`/`LivestockCategoryId`, or reintroduce a Flock aggregate with endpoints and seed data.
+
+### C4. Livestock creation never persists
+
+`CreateLivestockRecordCommand.cs:42`, `EfRepository.cs:31-33`
+
+The handler calls `AddAsync` and returns the id, but never calls `SaveChangesAsync`. `AddAsync` only attaches the entity. The row is not committed and the returned id is not retrievable. `GoatsController` still returns 201 and misleading docs.
+
+**Fix:** inject `IUnitOfWork` and call `SaveChangesAsync`, or use `IUnitOfWork.LivestockAnimals`.
+
+### C5. Vet deactivation deactivates the wrong user (or none)
+
+`AdminController.cs:96-105`
+
+The code looks up the user by `vet.Name` (a display name) through `GetByEmailAsync`, so it almost always finds nothing. `VetPartner` has no `UserId`/email link, and `IsActive` is toggled through reflection instead of a domain method.
+
+**Fix:** add `UserId`/`Email` to `VetPartner`, create a proper `Deactivate()` method, and deactivate by foreign key in the same transaction.
+
+### C6. The only Admin account cannot log in, and no API can create one
+
+`DemoDataSeeder.cs:63`
+
+The seeded admin password hash is the literal `$2a$11$hashedpassword`, which BCrypt cannot verify. Registration only creates `Farmer`; `AdminController` only creates `Vet`. `[Authorize(Roles = "Admin")]` endpoints are therefore unreachable.
+
+**Fix:** seed a real bcrypt hash from configuration or a startup secret, and provide a controlled admin bootstrap path.
+
+### C7. Payments cannot complete, and verification is incomplete
+
+`NombaPaymentService.cs:34-43`, `NombaPaymentService.cs:45-88`, `RecordPaymentCommand.cs:36-49`, `PaymentConfiguration.cs:20`
+
+`InitiatePayment` fabricates a reference locally without contacting Nomba. `RecordPayment` then requires that reference to verify successfully against Nomba, which cannot succeed for a fabricated reference. Additionally, the verified amount/currency is never compared with the requested amount, and replaying a reference hits the unique index and returns 500.
+
+**Fix:** call the real initiation endpoint and persist a pending payment, verify and compare amount/currency, add an idempotency key, and map duplicate references to 409.
+
+### C8. Cloudinary upload signature omits signed parameters
+
+`CloudinaryService.cs:43-57`
+
+The signature covers `folder` and `timestamp`, but the request also sends `quality=auto` and `fetch_format=auto`. Cloudinary requires every non-excluded parameter to be part of the signature, so uploads are rejected as invalid.
+
+**Fix:** include `quality` and `fetch_format` in the signed, alphabetically ordered parameter string (and keep them out of the multipart body only if intentionally unsigned, which is not supported).
+
+### C9. Migration history is a single baseline
+
+`src/FarmHand.Infrastructure/Persistence/Migrations/`
+
+Only `20261021213428_LivestockRestructure` exists and it creates every table from scratch. Any database that applied earlier migrations (including the previously committed `FixAuditIssues`) will fail at startup because the tables already exist, and `__EFMigrationsHistory` will not match.
+
+**Fix:** restore the full migration chain, or explicitly document and script a database reset for non-production environments.
+
+---
+
+## High issues
+
+### H1. Authentication is not authorization
+
+- `FarmsController` trusts `OwnerId` from the body; any authenticated user can create a farm for anyone and read any dashboard (`FarmsController.cs:22-57`).
+- `Incidents`, `Poultry`, `Voice`, `Chat`, `Payments`, `Goats` have no ownership checks.
+- `VetCoordination` allows any authenticated user to respond as a vet, choose any `VetPartnerId`, and set cost shares (`VetCoordinationController.cs:49-77`).
+- `User.FarmId` exists but is never set or enforced.
+- Only `/api/admin/*` checks a role, and that role is unobtainable (C6).
+
+**Fix:** derive the owner from `ClaimTypes.NameIdentifier`, add farm membership checks, require `Vet`/`Admin` roles for vet actions, and filter every query by the caller's farm.
+
+### H2. Validation and not-found errors still return 500
+
+`Program.cs:141-155`, `ValidationBehavior.cs:27`
+
+FluentValidation throws `ValidationException`, and handlers throw `KeyNotFoundException`; the global handler maps everything to a generic 500. `API.md` and the controllers claim 400/404.
+
+**Fix:** add exception mapping (`ValidationException` → 400 ProblemDetails with `errors`, `KeyNotFoundException` → 404, `InvalidOperationException` from domain → 409), and keep 500 for unknown failures.
+
+### H3. Login and registration are unhardened
+
+`AuthController.cs:37-89`
+
+No email format, password policy, rate limiting, lockout, refresh, or revocation. Duplicate registration races produce a 500 from the unique index. Default token lifetime is 7 days.
+
+**Fix:** add FluentValidation, `AddRateLimiter` on auth routes, a lockout counter, and short-lived access tokens with refresh.
+
+### H4. Predictable JWT secret in the example configuration
+
+`appsettings.example.json`, `JwtService.cs:20`
+
+The example ships the exact fallback secret, and `JwtService` still silently defaults to it. Developers who copy the example will run with a public key; if the example is deployed, tokens are forgeable.
+
+**Fix:** replace the example with `CHANGE_ME`, remove the fallback entirely, and require at least 32 random bytes.
+
+### H5. Automatic migration at startup in every environment
+
+`Program.cs:114-125`
+
+`MigrateAsync` runs before the environment check, despite the comment saying "Development only". Production deploys apply schema changes implicitly; a failed migration takes the app down.
+
+**Fix:** gate behind `IsDevelopment()` or a feature flag, and run migrations as a deployment step.
+
+### H6. Voice image analysis bypasses DI and leaks resources
+
+`VoiceController.cs:222-285`
+
+The controller duplicates `GroqVisionService`, creates a new `HttpClient` per request (never disposed), reads `GROQ_API_KEY`/`YARN_GPT_API_KEY` from environment variables instead of configuration, and has an unused `apiKey` variable. Sockets are exhausted under load.
+
+**Fix:** use `IVisionAnalysisService`, which is already registered.
+
+### H7. Rule engine, cost-share, and transaction abstractions are dead
+
+`IPoultryRuleEngine.cs`, `ICostShareCalculator.cs`, `TransactionBehavior.cs`
+
+Interfaces are declared but have no implementations or callers. Observations never trigger rule evaluation, so incidents are manual only. `TransactionBehavior` is a no-op and is not registered.
+
+**Fix:** implement or delete; if incident generation is intended, wire the rule engine into observation confirmation.
+
+### H8. Chat preview and confirm trust client input
+
+`ChatController.cs:44-155`
+
+The preview accepts any `livestockAnimalId`/`livestockCategoryId` without verifying existence or ownership; confirm accepts client-supplied extracted values and arbitrary `VisionAnalysisJson`. There is no rate limit on AI calls. A client can fabricate observations and burn provider credits.
+
+**Fix:** validate animal/category membership, ignore client-supplied extracted values (or mark them as farmer-corrected), and rate-limit AI endpoints.
+
+### H9. Vet registration is non-atomic and unlinked
+
+`AdminController.cs:46-55`, `VetPartner.cs`
+
+User and VetPartner are saved in two separate `SaveChanges` calls. A failure leaves an orphan user. There is no `UserId` on `VetPartner`, so the two records cannot be related or safely deactivated.
+
+**Fix:** persist both in one transaction (or one aggregate), add `UserId`, and use it for deactivation.
+
+### H10. Tests are placeholders
+
+`tests/FarmHand.UnitTests/UnitTest1.cs`, `tests/FarmHand.IntegrationTests/UnitTest1.cs`
+
+Both tests are empty and assert nothing; `dotnet test` reports 2 passing tests that verify no behavior. There is no coverage of domain invariants, validation, idempotency, auth, or the payment flow.
+
+**Fix:** add unit tests for `Incident` transitions, `Money`, validators, and idempotency, plus integration tests with `WebApplicationFactory` and a disposable PostgreSQL container.
+
+### H11. Seed guard hides partial databases
+
+`DemoDataSeeder.cs:19`
+
+`if (_dbContext.Farms.Any()) return;` means a database with any farm but missing users, categories, or vets is never repaired. Seeding also assigns ids through reflection.
+
+**Fix:** check each seed set independently and use constructor/factory ids.
+
+---
+
+## Medium issues
+
+### M1. No soft-delete query filters
+
+`BaseEntity.MarkDeleted`, `EfRepository` — `IsDeleted` is never filtered globally and `GetByIdAsync` uses `FindAsync`, which returns deleted rows. Some repositories filter, others do not.
+
+### M2. No pagination
+
+Incidents, observations, vets, and dashboard incidents are returned unbounded.
+
+### M3. Idempotency is check-then-insert
+
+`RecordObservationCommand.cs:47-52` + unique index. Two concurrent requests with the same key can both pass the check; one then fails with a unique violation (500). Handle `DbUpdateException` and return the existing row.
+
+### M4. Payment and reference edge cases
+
+`PaymentConfiguration.cs:20` enforces a unique `TransactionReference`, but default `string.Empty` is used for pending payments; any future pending-payment flow will collide. No provider error details are surfaced.
+
+### M5. AI resilience
+
+No timeouts, retries, or circuit breakers despite `Polly` and `Microsoft.Extensions.Http.Polly` being referenced. `FarmAiService` treats caller cancellation as a provider failure (`TaskCanceledException`). Model ids (`mixtral-8x7b-32768`, `llama-3.2-11b-vision-preview`) should be verified against current Groq availability.
+
+### M6. Prompt injection and output trust
+
+Farmer text is interpolated into prompts without delimiters or a JSON schema constraint. Model output is parsed with regex and deserialized without bounds (except mortality). A crafted message can influence extracted values.
+
+### M7. Missing platform protections
+
+No CORS policy, rate limiting, HSTS/security headers, upload size limits, or request timeouts. Voice polling can hold a request for up to ~45 s (`YarnGptService`).
+
+### M8. Configuration and startup validation
+
+Cloudinary, Nomba, Gemini, Groq, and YarnGPT keys are optional at startup and fail at request time with 500s. Add options validation (`ValidateOnStart`) and clear startup errors.
+
+### M9. Documentation drift
+
+`API.md` has been refreshed for the current routes and behavior, and the stale Swagger/controller remarks were corrected. Remaining drift: `ChatController` and `AuthController` have no `[ProducesResponseType]` attributes, the chat endpoint contracts are documented only in `API.md`, and Swagger does not describe the multipart chat form. Regenerate or hand-check `API.md` after every route change.
+
+### M10. Duplicate and unused registrations
+
+`ServiceRegistration.cs:48-53` registers `YarnGptService` twice and `IGroqVisionService` twice. `Polly` packages, `IJwtService`, `AuditEvent`, `Class1.cs`, and `Directory.Packages.props` (central versions are not enabled) are unused.
+
+### M11. Audit trail not written
+
+`AuditEvent` is mapped and migrated but no code writes one. Regulated actions (payment, incident status, vet registration) are unlogged beyond console logs.
+
+### M12. Inconsistent casing and DTO drift
+
+`IncidentDto`/`Incident` still expose `FlockId`; livestock lives in `LivestockAnimalId`. Dashboard `vetRequests` is always empty; action plan is string-based.
+
+---
+
+## Low issues
+
+- Seeder uses `GetType().GetProperty("Id")!.SetValue(...)` instead of a factory or `InternalsVisibleTo` (L1).
+- `CreatedAtAction` points at POST actions, producing odd `Location` headers (L2).
+- `Class1.cs` and stale comments in `VoiceController.cs:191-194` (L3).
+- `/health` does not check the database or dependencies (L4).
+- Redundant explicit usings in `Program.cs`; `AddMediatR(Assembly)` uses an obsolete overload (L5).
+- `Payment.Status` is a string instead of an enum (L6).
+- No request correlation id in logs (L7).
+- `Directory.Packages.props` lists versions that are not applied (L8).
+
+---
+
+## Positive patterns
+
+- Clean separation: Domain / Application (CQRS + MediatR) / Infrastructure / API.
+- FluentValidation pipeline with per-command validators.
+- Domain behavior in entities (`Incident` transitions, `PoultryObservation` confirmation, `Money` value object).
+- JWT validation configured for issuer, audience, lifetime, and signing key; bcrypt hashing; generic login error message.
+- EF configurations with explicit FKs and unique indexes; migration present.
+- API documentation and Swagger with bearer auth and XML comments.
+- Global exception handler no longer leaks stack traces or raw messages (voice controllers still do).
+- Idempotency keys and provider verification are the right direction, even where implementation is incomplete.
+
+---
+
+## Remediation order
+
+1. **C1, C2, C3** — restore a coherent livestock/flock model and make voice, chat, and incident creation agree with the schema.
+2. **C4, C6, C9** — persistence and bootstrap: goats save, real admin seed, migration chain.
+3. **C7, C8** — payment and Cloudinary flows end-to-end.
+4. **H1, H2** — ownership/role checks and correct status codes.
+5. **H3-H5** — auth hardening, secret management, startup migration policy.
+6. **H6-H11** — DI cleanup, rule engine decision, atomic vet registration, tests.
+7. **M-series** — pagination, soft delete, resilience, docs refresh.
+
+---
+
+## Authorization matrix (current)
+
+| Route | Policy | Ownership check |
 |---|---|---|
-| Architecture | 7/10 | Clean layering, CQRS, validators, domain encapsulation |
-| Build / ops | 2/10 | Does not build here; startup fails on DI |
-| Security / authz | 2/10 | Forgeable JWT, no tenant isolation, no token issuance |
-| Data integrity | 3/10 | No foreign keys, no idempotency, stub payments |
-| Tests | 0/10 | Both test projects are empty templates |
+| `/api/auth/*` | Anonymous | n/a |
+| `/api/farms/*` | Authenticated | None; owner from body |
+| `/api/incidents/*` | Authenticated | None |
+| `/api/poultry/*` | Authenticated | None |
+| `/api/voice/*` | Authenticated | None |
+| `/api/chat/*` | Authenticated | None |
+| `/api/vetcoordination/*` | Authenticated | None; no Vet role |
+| `/api/payments/*` | Authenticated | None |
+| `/api/goats/*` | Authenticated | None |
+| `/api/admin/*` | `Admin` role | Role only; role unobtainable |
+| `/health` | Anonymous | n/a |
 
 ---
 
-## Critical
-
-### C1. Build fails: SDK mismatch
-
-All projects target `net10.0` (`Directory.Build.props:7`) but only SDKs 8.0.416 / 9.0.308 are installed, and there is no `global.json`.
-
-```
-dotnet build FarmHand.slnx   ->   NETSDK1045 on all 6 projects
-```
-
-Package versions are also mixed (`JwtBearer` / EF `9.0.0`, `OpenApi 10.0.12`) against a `net10.0` target framework.
-
-**Fix:** Add a `global.json` and retarget to `net9.0`, or install the .NET 10 SDK and align package versions.
-
-### C2. Application cannot start — seeder not registered
-
-`Program.cs:60` resolves `DemoDataSeeder`, but nothing registers it (`ServiceRegistration.cs` has no entry). Startup throws `InvalidOperationException`.
-
-The seeder also runs unconditionally in every environment and before migrations are applied (`Program.cs:57-62`).
-
-**Fix:** Register the seeder (scoped), guard it with `app.Environment.IsDevelopment()`, and call `Database.Migrate()` first.
-
-### C3. Image observations crash on DI resolution
-
-`VisionAnalysisService` depends on the concrete `GroqVisionService` (`Services/VisionAnalysisService.cs:10-16`), but only `IGroqVisionService` is registered (`ServiceRegistration.cs:50-51`). Any `RecordObservationCommand` with an `ImageUrl` fails to resolve.
-
-**Fix:** Depend on `IGroqVisionService`, or register the concrete type.
-
-### C4. Forgeable JWT and no way to obtain a token
-
-- Hardcoded fallback signing key at `Program.cs:37` and `Services/JwtService.cs:20`, duplicated in `appsettings.example.json:24`.
-- Deploy without `Jwt:SecretKey` and anyone can mint valid tokens.
-- `JwtService.GenerateToken` is never called and there is no auth/login endpoint, so every `[Authorize]` controller is unreachable for real users.
-
-**Fix:** Fail fast when `Jwt:SecretKey` is missing; add an authentication endpoint; remove the fallback from code and sample config.
-
-### C5. Secrets remain in git history
-
-Commit `b296fb7` contained `appsettings.json` with the database password and JWT key. Commit `bda24b7` only untracked the file; history is unchanged.
-
-**Fix:** Rotate the JWT key and database password, then purge history with `git filter-repo` if the repository is shared.
-
-### C6. No authorization or tenant checks (IDOR)
-
-- `CreateFarmCommand` accepts `OwnerId` from the request body (`Features/Farms/CreateFarmCommand.cs:7`).
-- `GetDashboard` accepts any `farmId` (`Controllers/FarmsController.cs:26-33`).
-- Vet-only actions are callable by any authenticated user (`Controllers/VetCoordinationController.cs`).
-
-Any authenticated user can read or write any farm's data.
-
-**Fix:** Derive the owner from the token claims and enforce ownership/role checks in handlers or policies.
-
-### C7. Payment integrity
-
-- `RecordPaymentCommand` trusts client-supplied amount and reference, then immediately marks the payment `Completed` (`Features/Payments/RecordPaymentCommand.cs:26-30`).
-- `NombaPaymentService` always returns success and never calls Nomba (`Payments/NombaPaymentService.cs:30-37`); `IPaymentService` is not used by the payment flow.
-- `Payment.TransactionReference` has no unique index, and payments are never reconciled against the vet request.
-
-**Fix:** Verify with the provider before marking paid, make the reference unique, and reconcile totals.
-
-### C8. Goats feature silently discards data
-
-The record is constructed but never added, then `SaveChanges` is called (`Features/Goats/CreateLivestockRecordCommand.cs:25-37`). The endpoint returns an ID for a row that was never persisted.
-
-**Fix:** Add an `ILivestockRecordRepository` and call `AddAsync` before saving.
-
-### C9. No exception pipeline
-
-There is no `UseExceptionHandler` / `AddProblemDetails`, so `ValidationException` and `KeyNotFoundException` surface as HTTP 500. Controllers return raw exception text to clients (`VoiceController.cs:89,159,269,284`).
-
-**Fix:** Add a global exception handler mapping validation to 400, not-found to 404, and return a generic message to clients.
-
-### C10. Zero foreign-key constraints
-
-All 15 tables in `20261021164412_AddImageSupportToPoultryObservation.cs` are created with indexes only — there is not a single `ForeignKey`. Configurations use `HasIndex` but never `HasOne`/`WithMany`, so flocks, incidents, and payments can reference nonexistent rows.
-
-**Fix:** Add EF relationships (or explicit FK constraints) and regenerate migrations.
-
----
-
-## High
-
-### H1. Idempotency is not implemented
-
-`IdempotencyKey` is validated then ignored (`Features/Poultry/RecordObservationCommand.cs:11,76`); `ExistsUnconfirmedAsync` is dead code. Client retries create duplicate observations.
-
-### H2. Every AI path is paid for twice
-
-- `VoiceCheckIn` extracts at `VoiceController.cs:61`, then sends a command that extracts again (`RecordObservationCommand.cs:33-47`).
-- Image check-in runs Groq vision in the controller (`VoiceController.cs:118`) and again inside the command via `VisionAnalysisService`.
-
-This doubles cost and latency, and the returned values may not match what was stored.
-
-### H3. Cloudinary integration is unsigned and will fail
-
-Upload sends `api_key` but no `signature`/`timestamp` (`Services/CloudinaryService.cs:38-47`); delete is also unsigned (`:71-79`, with an explicit "in production you'd sign this" comment). `ApiSecret` is read and never used.
-
-### H4. LLM input is treated as trusted
-
-Raw farmer text is string-interpolated into prompts (`AI/Clients/GeminiAiClient.cs:27`, `GroqAiClient.cs:27`, `AI/Services/GroqVisionService.cs:47`). Prompt injection can steer extraction, and parsed `MortalityCount`/confidence are never range-checked, so negative or absurd values can persist.
-
-### H5. Gemini API key in URL query string
-
-`GeminiAiClient.cs:44` puts the key in the query string, which leaks into proxy and access logs. Use the `x-goog-api-key` header.
-
-### H6. Hardcoded, likely-retired model IDs
-
-`gemini-1.5-flash`, `mixtral-8x7b-32768`, and `llama-3.2-11b-vision-preview` are hardcoded. Move them to configuration and verify them against current provider catalogs before demo day.
-
-### H7. HttpClient created per request and undisposed
-
-`VoiceController.cs:200` news up an `HttpClient` per request with no disposal. API keys come from `Environment.GetEnvironmentVariable` (`:196-198`) instead of `IConfiguration`, and this duplicates the existing `GroqVisionService`.
-
-### H8. PII in logs
-
-Full voice transcripts are logged at `Information` (`VoiceController.cs:58`) and Cloudinary URLs at `:115`. Add redaction and a retention policy.
-
-### H9. No rate limiting, CORS, upload-size, or content-type validation
-
-AI/STT endpoints are expensive and file uploads accept anything (`VoiceController.cs:41-57,97-114`). Add request limits, validation, and throttling.
-
-### H10. Migration history is unusable
-
-A single migration named `AddImageSupportToPoultryObservation` actually creates the entire schema. There is no initial migration and no `Database.Migrate()` call, so a fresh environment cannot reliably provision.
-
-### H11. Core product logic is not implemented
-
-`IPoultryRuleEngine`, `ICostShareCalculator`, `CaseFileDto`, and `PoultryObservationDto` have no implementations or usages. `AuditEvent` is never written (no audit trail for payments). `TransactionBehavior` is a no-op and unregistered. `JwtService` is registered but never used.
-
----
-
-## Medium / Minor
-
-| # | Finding | Location |
-|---|---|---|
-| M1 | `GetByIdWithActionsAsync` / `GetByIdWithDetailsAsync` do not include children | `Repositories/IncidentRepository.cs:18-21`, `VetRequestRepository.cs:13-16` |
-| M2 | Dashboard always returns an empty vet-request list | `Features/Farms/GetDashboardQuery.cs:41-44` |
-| M3 | Status command silently no-ops for `Open`/unknown and returns 200; transitions unguarded, no concurrency token | `Features/Incidents/UpdateIncidentStatusCommand.cs:33-48` |
-| M4 | Soft delete is dead code: `IsDeleted` never filtered, repositories hard-delete | `Domain/Entities/BaseEntity.cs` |
-| M5 | UnitOfWork news up repositories while they are also DI-registered; no livestock repository | `Repositories/UnitOfWork.cs:28-38`, `ServiceRegistration.cs:27-36` |
-| M6 | `Money` accepts negative amounts and arbitrary currencies; `Email` unused; cost shares never reconciled | `Domain/ValueObjects/Money.cs:5-12` |
-| M7 | Seeder sets protected IDs via reflection; synchronous `.Any()` inside async method | `SeedData/DemoDataSeeder.cs:23,28,39` |
-| M8 | Unbounded list endpoints (`GetAllAsync`, incidents) — no paging | `Repositories/EfRepository.cs:26-29` |
-| M9 | `Directory.Packages.props` is inert (no `ManagePackageVersionsCentrally`); versions declared twice | `Directory.Packages.props` |
-| M10 | Repo hygiene: `.agoya/` committed, `Class1.cs` left over, stale `.http` request, no README/CI, Swagger missing JWT scheme, placeholder tests | repo-wide |
-| M11 | `UseHttpsRedirection` active while `launchSettings.json` advertises an HTTP-only profile | `Program.cs:71`, `Properties/launchSettings.json` |
-
----
-
-## What is done well
-
-- Clear Dependency Rule: Domain has no infrastructure references; Application depends only on Domain abstractions.
-- CQRS handlers are small, single-purpose, and consistently pass `CancellationToken`.
-- FluentValidation validators co-located with commands and wired through `ValidationBehavior`; MediatR `LoggingBehavior` present.
-- Domain entities use protected setters plus intention-revealing methods (`Incident.Resolve`, `Payment.MarkCompleted`) — real encapsulation, not anemic models.
-- EF configurations are explicit (max lengths, indexes, owned `Money` types) rather than convention-only.
-- AI extraction has a sensible Gemini→Groq fallback (`AI/Services/FarmAiService.cs:31-51`), and vision prompts deliberately avoid diagnosis/treatment.
-- `appsettings.example.json` + `.gitignore` is the right pattern (needs history cleanup and no real default key).
-
----
-
-## Recommended remediation order
-
-1. Add `global.json` and retarget to `net9.0` (or install .NET 10) — nothing can be verified until `dotnet build` passes.
-2. Register `DemoDataSeeder`, gate it to Development, add `Database.Migrate()`, and fix the `GroqVisionService` DI registration.
-3. Remove JWT fallback keys, add a token-issuing auth endpoint, enforce owner/role checks on every farm/incident/payment route, and purge git history.
-4. Add `UseExceptionHandler` / `AddProblemDetails` and validation-to-400 mapping; stop returning `ex.Message`.
-5. Fix the Goats handler, persist and consume `IdempotencyKey`, and de-duplicate AI calls (extract once, pass results into the command).
-6. Add EF relationships/foreign keys and unique indexes (`Payment.TransactionReference`, observation dedupe), plus a real initial migration.
-7. Sign Cloudinary requests, move model IDs/keys to configuration, and add rate limiting and upload constraints.
-8. Write domain/application tests for the incident state machine, cost-share math, and payment recording before extending features.
+## Open questions
+
+1. Is `Flock` still a product concept, or should incidents move to `LivestockAnimal`/`LivestockCategory` (C3)?
+2. Are flock-level observations required, or should every observation reference an animal (C1)?
+3. Is the Nomba sandbox expected to verify locally fabricated references, or must `/initiate` call the provider (C7)?
+4. Who bootstraps the first Admin account (C6)?
+5. Should the migration be reset for the hackathon, or does a deployed database already have history (C9)?

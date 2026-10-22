@@ -21,8 +21,7 @@ public class GoatsController : ControllerBase
 
     /// <summary>Create a livestock record.</summary>
     /// <remarks>
-    /// Known issue: the handler currently builds the record but never adds it to the
-    /// unit of work, so nothing is persisted. The returned id is not retrievable.
+    /// The record is persisted before the new id is returned.
     /// </remarks>
     /// <param name="command">Livestock record details.</param>
     /// <param name="ct">Cancellation token.</param>

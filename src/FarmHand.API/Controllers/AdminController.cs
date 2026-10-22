@@ -2,6 +2,7 @@ using FarmHand.Domain.Entities;
 using FarmHand.Domain.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using System.ComponentModel.DataAnnotations;
 
 namespace FarmHand.API.Controllers;
 
@@ -26,35 +27,53 @@ public class AdminController : ControllerBase
 
     /// <summary>
     /// Register a vet doctor on the system. Admin only.
-    /// Creates both a User account (Vet role) and a VetPartner profile.
+    /// Creates the User account and VetPartner profile in one transaction.
     /// </summary>
+    /// <response code="201">Vet registered with linked user id.</response>
+    /// <response code="400">Validation failed or email already registered.</response>
     [HttpPost("vets")]
+    [ProducesResponseType(StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> RegisterVet([FromBody] RegisterVetRequest request, CancellationToken ct)
     {
-        if (await _userRepository.ExistsByEmailAsync(request.Email, ct))
+        var email = request.Email.Trim().ToLowerInvariant();
+
+        if (await _userRepository.ExistsByEmailAsync(email, ct))
             return BadRequest(new { error = "Email already registered." });
 
-        var passwordHash = BCrypt.Net.BCrypt.HashPassword(request.TemporaryPassword);
+        if (string.IsNullOrWhiteSpace(request.TemporaryPassword) || request.TemporaryPassword.Length < 8)
+            return BadRequest(new { error = "Temporary password must be at least 8 characters." });
+
+        if (System.Text.Encoding.UTF8.GetByteCount(request.TemporaryPassword) > 72)
+            return BadRequest(new { error = "Temporary password must be at most 72 bytes." });
 
         var vetUser = new User(
-            request.Email,
-            passwordHash,
+            email,
+            BCrypt.Net.BCrypt.HashPassword(request.TemporaryPassword),
             "Vet",
-            request.FullName,
-            request.PhoneNumber);
-
-        await _unitOfWork.Users.AddAsync(vetUser, ct);
-        await _unitOfWork.SaveChangesAsync(ct);
+            request.FullName?.Trim(),
+            request.PhoneNumber?.Trim());
 
         var vetPartner = new VetPartner(
-            request.FullName ?? request.Email,
+            vetUser.Id,
+            request.FullName?.Trim() ?? email,
+            email,
             request.Specialization,
             request.Contact);
 
-        await _vetPartnerRepository.AddAsync(vetPartner, ct);
-        await _unitOfWork.SaveChangesAsync(ct);
+        await _unitOfWork.Users.AddAsync(vetUser, ct);
+        await _unitOfWork.VetPartners.AddAsync(vetPartner, ct);
 
-        return CreatedAtAction(nameof(RegisterVet), new { }, new
+        try
+        {
+            await _unitOfWork.SaveChangesAsync(ct);
+        }
+        catch (Microsoft.EntityFrameworkCore.DbUpdateException)
+        {
+            return BadRequest(new { error = "Email already registered." });
+        }
+
+        return CreatedAtAction(nameof(ListVets), new { }, new
         {
             vetId = vetPartner.Id,
             userId = vetUser.Id,
@@ -65,9 +84,7 @@ public class AdminController : ControllerBase
         });
     }
 
-    /// <summary>
-    /// List all registered vets. Admin only.
-    /// </summary>
+    /// <summary>List all registered vets. Admin only.</summary>
     [HttpGet("vets")]
     public async Task<IActionResult> ListVets(CancellationToken ct)
     {
@@ -75,7 +92,9 @@ public class AdminController : ControllerBase
         return Ok(vets.Select(v => new
         {
             v.Id,
+            v.UserId,
             v.Name,
+            v.Email,
             v.Specialization,
             v.Contact,
             v.IsActive,
@@ -83,25 +102,30 @@ public class AdminController : ControllerBase
         }));
     }
 
-    /// <summary>
-    /// Deactivate a vet. Admin only.
-    /// </summary>
+    /// <summary>Deactivate a vet and their linked user account. Admin only.</summary>
+    /// <response code="200">Vet deactivated.</response>
+    /// <response code="404">Vet not found.</response>
     [HttpDelete("vets/{vetId}")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> DeactivateVet(Guid vetId, CancellationToken ct)
     {
         var vet = await _vetPartnerRepository.GetByIdAsync(vetId, ct);
         if (vet is null)
             return NotFound(new { error = "Vet not found." });
 
-        // Deactivate the associated user account
-        var user = await _userRepository.GetByEmailAsync(vet.Name, ct);
-        if (user is not null)
+        vet.Deactivate();
+
+        if (vet.UserId is { } userId)
         {
-            user.Deactivate();
-            _unitOfWork.Users.Update(user);
+            var user = await _userRepository.GetByIdAsync(userId, ct);
+            if (user is not null)
+            {
+                user.Deactivate();
+                _unitOfWork.Users.Update(user);
+            }
         }
 
-        vet.GetType().GetProperty("IsActive")!.SetValue(vet, false);
         _vetPartnerRepository.Update(vet);
         await _unitOfWork.SaveChangesAsync(ct);
 
@@ -110,12 +134,9 @@ public class AdminController : ControllerBase
 }
 
 public record RegisterVetRequest(
-    string Email,
-    string TemporaryPassword,
-    string FullName,
-    string Specialization,
-    string Contact,
-    string? PhoneNumber = null);
-
-// Need IVetPartnerRepository - let me check if it exists
-// If not, we need to add it
+    [property: Required, EmailAddress, MaxLength(255)] string Email,
+    [property: Required] string TemporaryPassword,
+    [property: MaxLength(200)] string? FullName,
+    [property: Required, MaxLength(100)] string Specialization,
+    [property: Required, MaxLength(200)] string Contact,
+    [property: MaxLength(20)] string? PhoneNumber = null);

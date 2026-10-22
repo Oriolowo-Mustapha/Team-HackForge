@@ -14,16 +14,21 @@ public class IncidentConfiguration : IEntityTypeConfiguration<Incident>
         builder.Property(x => x.EvidenceSummary).IsRequired().HasMaxLength(1000);
         builder.Property(x => x.RuleVersion).HasMaxLength(50);
         builder.HasIndex(x => x.FarmId);
-        builder.HasIndex(x => x.FlockId);
+        builder.HasIndex(x => x.LivestockAnimalId);
+        builder.HasIndex(x => x.LivestockCategoryId);
         builder.HasIndex(x => x.Status);
 
         builder.HasOne<Farm>()
             .WithMany()
             .HasForeignKey(x => x.FarmId)
             .OnDelete(DeleteBehavior.Cascade);
-        builder.HasOne<Flock>()
+        builder.HasOne<LivestockAnimal>()
             .WithMany()
-            .HasForeignKey(x => x.FlockId)
-            .OnDelete(DeleteBehavior.Cascade);
+            .HasForeignKey(x => x.LivestockAnimalId)
+            .OnDelete(DeleteBehavior.SetNull);
+        builder.HasOne<LivestockCategory>()
+            .WithMany()
+            .HasForeignKey(x => x.LivestockCategoryId)
+            .OnDelete(DeleteBehavior.SetNull);
     }
 }

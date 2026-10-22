@@ -36,11 +36,10 @@ public class CloudinaryService : ICloudinaryService
     public async Task<CloudinaryUploadResult> UploadImageAsync(Stream imageStream, string fileName, string folder = "farmhand", CancellationToken ct = default)
     {
         var timestamp = ((int)(DateTime.UtcNow - new DateTime(1970, 1, 1)).TotalSeconds).ToString();
-        var folderParam = $"folder={folder}";
-        var timestampParam = $"timestamp={timestamp}";
 
-        // Cloudinary signature: HMAC-SHA1 of sorted parameters concatenated with api_secret
-        var toSign = $"{folderParam}&{timestampParam}&{_apiSecret}";
+        // Cloudinary signature: HMAC-SHA1 of alphabetically sorted parameters + api_secret.
+        // Every parameter sent in the request (except file, api_key, signature) must be signed.
+        var toSign = $"fetch_format=auto&folder={folder}&quality=auto&timestamp={timestamp}{_apiSecret}";
         var signature = ComputeSignature(toSign);
 
         var uploadUrl = $"https://api.cloudinary.com/v1_1/{_cloudName}/image/upload";
@@ -81,7 +80,7 @@ public class CloudinaryService : ICloudinaryService
     public async Task<bool> DeleteImageAsync(string publicId, CancellationToken ct = default)
     {
         var timestamp = ((int)(DateTime.UtcNow - new DateTime(1970, 1, 1)).TotalSeconds).ToString();
-        var toSign = $"public_id={publicId}&timestamp={timestamp}&{_apiSecret}";
+        var toSign = $"public_id={publicId}&timestamp={timestamp}{_apiSecret}";
         var signature = ComputeSignature(toSign);
 
         var deleteUrl = $"https://api.cloudinary.com/v1_1/{_cloudName}/image/destroy";
