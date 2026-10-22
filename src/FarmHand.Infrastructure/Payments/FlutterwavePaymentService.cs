@@ -206,4 +206,25 @@ public class FlutterwavePaymentService : IPaymentService
         using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(_signingSecret));
         return Convert.ToHexString(hmac.ComputeHash(Encoding.UTF8.GetBytes(payload))).ToLowerInvariant()[..16];
     }
+
+    public bool VerifyWebhookSignature(string rawBody, string? flutterwaveSignature, string? verifHash, string secretHash)
+    {
+        if (!string.IsNullOrWhiteSpace(flutterwaveSignature))
+        {
+            using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(secretHash));
+            var hash = Convert.ToBase64String(hmac.ComputeHash(Encoding.UTF8.GetBytes(rawBody)));
+            return CryptographicOperations.FixedTimeEquals(
+                Encoding.UTF8.GetBytes(hash),
+                Encoding.UTF8.GetBytes(flutterwaveSignature));
+        }
+
+        if (!string.IsNullOrWhiteSpace(verifHash))
+        {
+            return CryptographicOperations.FixedTimeEquals(
+                Encoding.UTF8.GetBytes(secretHash),
+                Encoding.UTF8.GetBytes(verifHash));
+        }
+
+        return false;
+    }
 }

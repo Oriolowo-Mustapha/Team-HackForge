@@ -1,11 +1,15 @@
+using FarmHand.Application.Common.Interfaces;
 using FarmHand.Application.Features.Payments;
+using FarmHand.Domain.Interfaces;
 using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using System.Text;
+using System.Text.Json;
 
 namespace FarmHand.API.Controllers;
 
-/// <summary>Payment initiation and verified payment recording.</summary>
+/// <summary>Payment initiation, verified payment recording, and Flutterwave webhooks.</summary>
 [ApiController]
 [Route("api/[controller]")]
 [Authorize]
@@ -13,10 +17,26 @@ namespace FarmHand.API.Controllers;
 public class PaymentsController : ControllerBase
 {
     private readonly IMediator _mediator;
+    private readonly IPaymentService _paymentService;
+    private readonly IPaymentRepository _paymentRepository;
+    private readonly IUnitOfWork _unitOfWork;
+    private readonly IConfiguration _configuration;
+    private readonly ILogger<PaymentsController> _logger;
 
-    public PaymentsController(IMediator mediator)
+    public PaymentsController(
+        IMediator mediator,
+        IPaymentService paymentService,
+        IPaymentRepository paymentRepository,
+        IUnitOfWork unitOfWork,
+        IConfiguration configuration,
+        ILogger<PaymentsController> logger)
     {
         _mediator = mediator;
+        _paymentService = paymentService;
+        _paymentRepository = paymentRepository;
+        _unitOfWork = unitOfWork;
+        _configuration = configuration;
+        _logger = logger;
     }
 
     /// <summary>Initiate a payment and obtain a transaction reference.</summary>
@@ -76,6 +96,71 @@ public class PaymentsController : ControllerBase
     {
         await _mediator.Send(command, ct);
         return Ok(new { status = "paid" });
+    }
+
+    /// <summary>Flutterwave payment webhook.</summary>
+    /// <remarks>
+    /// Flutterwave posts charge events here. The request is authenticated by the
+    /// <c>flutterwave-signature</c> (HMAC-SHA256 of the raw body) or <c>verif-hash</c> header
+    /// against <c>Flutterwave:WebhookSecretHash</c>. On a successful charge the matching pending
+    /// payment is marked completed; all other events are acknowledged with 200.
+    /// </remarks>
+    /// <param name="ct">Cancellation token.</param>
+    /// <response code="200">Webhook acknowledged.</response>
+    /// <response code="401">Invalid or missing webhook signature.</response>
+    [HttpPost("webhook")]
+    [AllowAnonymous]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    public async Task<IActionResult> FlutterwaveWebhook(CancellationToken ct)
+    {
+        Request.EnableBuffering();
+        var rawBody = await new StreamReader(Request.Body, leaveOpen: true).ReadToEndAsync(ct);
+        Request.Body.Position = 0;
+
+        var secretHash = _configuration["Flutterwave:WebhookSecretHash"] ?? string.Empty;
+        var flutterwaveSignature = Request.Headers["flutterwave-signature"].FirstOrDefault();
+        var verifHash = Request.Headers["verif-hash"].FirstOrDefault();
+
+        if (!_paymentService.VerifyWebhookSignature(rawBody, flutterwaveSignature, verifHash, secretHash))
+        {
+            _logger.LogWarning("Flutterwave webhook signature verification failed");
+            return Unauthorized();
+        }
+
+        using var doc = JsonDocument.Parse(rawBody);
+        var root = doc.RootElement;
+        var eventType = root.TryGetProperty("event", out var eventEl) ? eventEl.GetString() : string.Empty;
+        if (!root.TryGetProperty("data", out var data))
+            return Ok();
+
+        var txRef = data.TryGetProperty("tx_ref", out var txRefEl) ? txRefEl.GetString() : string.Empty;
+        var flutterwaveId = data.TryGetProperty("id", out var idEl) ? idEl.GetString() : string.Empty;
+        var status = data.TryGetProperty("status", out var statusEl) ? statusEl.GetString() : string.Empty;
+        var isSuccessful = string.Equals(status, "successful", StringComparison.OrdinalIgnoreCase);
+        var isChargeEvent = string.Equals(eventType, "charge.completed", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(eventType, "payment.completed", StringComparison.OrdinalIgnoreCase);
+
+        if (isChargeEvent && isSuccessful && !string.IsNullOrWhiteSpace(flutterwaveId))
+        {
+            var verification = await _paymentService.VerifyPaymentAsync(flutterwaveId, ct);
+            if (verification.Success)
+            {
+                var payment = await _paymentRepository.GetByTransactionReferenceAsync(flutterwaveId, ct)
+                    ?? (!string.IsNullOrWhiteSpace(txRef)
+                        ? await _paymentRepository.GetByTransactionReferenceAsync(txRef, ct)
+                        : null);
+
+                if (payment is not null && payment.Status != "Completed")
+                {
+                    payment.MarkCompleted(flutterwaveId);
+                    await _unitOfWork.SaveChangesAsync(ct);
+                    _logger.LogInformation("Payment {TransactionReference} marked completed via webhook", flutterwaveId);
+                }
+            }
+        }
+
+        return Ok();
     }
 }
 

@@ -88,4 +88,50 @@ public class FlutterwavePaymentServiceTests
 
         Assert.False(result.Success);
     }
+
+    [Fact]
+    public void VerifyWebhookSignature_HmacSignature_ReturnsTrue()
+    {
+        var service = CreateService("webhook-secret-hash");
+        var rawBody = "{\"event\":\"charge.completed\",\"data\":{\"id\":12345,\"tx_ref\":\"FH_ref\",\"status\":\"successful\"}}";
+        using var hmac = new System.Security.Cryptography.HMACSHA256(System.Text.Encoding.UTF8.GetBytes("webhook-secret-hash"));
+        var expected = Convert.ToBase64String(hmac.ComputeHash(System.Text.Encoding.UTF8.GetBytes(rawBody)));
+
+        var valid = service.VerifyWebhookSignature(rawBody, expected, null, "webhook-secret-hash");
+
+        Assert.True(valid);
+    }
+
+    [Fact]
+    public void VerifyWebhookSignature_TamperedBody_ReturnsFalse()
+    {
+        var service = CreateService("webhook-secret-hash");
+        var rawBody = "{\"event\":\"charge.completed\",\"data\":{\"id\":12345,\"tx_ref\":\"FH_ref\",\"status\":\"successful\"}}";
+        using var hmac = new System.Security.Cryptography.HMACSHA256(System.Text.Encoding.UTF8.GetBytes("webhook-secret-hash"));
+        var expected = Convert.ToBase64String(hmac.ComputeHash(System.Text.Encoding.UTF8.GetBytes(rawBody)));
+
+        var valid = service.VerifyWebhookSignature(rawBody + "extra", expected, null, "webhook-secret-hash");
+
+        Assert.False(valid);
+    }
+
+    [Fact]
+    public void VerifyWebhookSignature_VerifHash_ReturnsTrue()
+    {
+        var service = CreateService("webhook-secret-hash");
+
+        var valid = service.VerifyWebhookSignature("any body", null, "webhook-secret-hash", "webhook-secret-hash");
+
+        Assert.True(valid);
+    }
+
+    [Fact]
+    public void VerifyWebhookSignature_NoSignature_ReturnsFalse()
+    {
+        var service = CreateService("webhook-secret-hash");
+
+        var valid = service.VerifyWebhookSignature("any body", null, null, "webhook-secret-hash");
+
+        Assert.False(valid);
+    }
 }

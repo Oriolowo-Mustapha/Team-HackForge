@@ -12,4 +12,5 @@ public interface IPaymentService
 {
     Task<PaymentResult> InitiatePaymentAsync(Guid vetRequestId, decimal amount, string currency, string customerEmail, string? customerName = null, CancellationToken ct = default);
     Task<PaymentResult> VerifyPaymentAsync(string transactionReference, CancellationToken ct = default);
+    bool VerifyWebhookSignature(string rawBody, string? flutterwaveSignature, string? verifHash, string secretHash);
 }
