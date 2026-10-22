@@ -43,7 +43,7 @@ public static class ServiceRegistration
         services.AddScoped<IFarmAiService, FarmAiService>();
 
         // Services
-        services.AddHttpClient<IPaymentService, NombaPaymentService>();
+        services.AddHttpClient<IPaymentService, FlutterwavePaymentService>();
         services.AddScoped<IJwtService, JwtService>();
         services.AddHttpClient<YarnGptService>();
         services.AddHttpClient<ICloudinaryService, CloudinaryService>();

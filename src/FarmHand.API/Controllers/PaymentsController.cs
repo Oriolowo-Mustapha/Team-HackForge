@@ -21,13 +21,14 @@ public class PaymentsController : ControllerBase
 
     /// <summary>Initiate a payment and obtain a transaction reference.</summary>
     /// <remarks>
-    /// Creates a pending payment owned by the caller and obtains a reference from Nomba
-    /// (or the signed sandbox reference when <c>Nomba:Mode</c> is not <c>Live</c>).
+    /// Creates a pending payment owned by the caller and obtains a reference from Flutterwave
+    /// (or the signed sandbox reference when <c>Flutterwave:Mode</c> is not <c>Live</c>).
+    /// The response includes <c>checkoutUrl</c> which the caller should redirect the payer to.
     /// The reference must be passed to <c>POST /api/payments/record</c> after payment.
     /// </remarks>
     /// <param name="request">Vet request, amount, and currency.</param>
     /// <param name="ct">Cancellation token.</param>
-    /// <response code="200">Reference created; body contains <c>transactionReference</c>.</response>
+    /// <response code="200">Reference created; body contains <c>transactionReference</c> and <c>checkoutUrl</c>.</response>
     /// <response code="400">Provider rejected the initiation request.</response>
     /// <response code="401">Missing or invalid bearer token.</response>
     /// <response code="403">The vet request belongs to another farm.</response>
@@ -42,11 +43,11 @@ public class PaymentsController : ControllerBase
         [FromBody] InitiatePaymentRequest request,
         CancellationToken ct)
     {
-        var reference = await _mediator.Send(
+        var result = await _mediator.Send(
             new InitiatePaymentCommand(request.VetRequestId, request.Amount, request.Currency),
             ct);
 
-        return Ok(new { transactionReference = reference });
+        return Ok(new { transactionReference = result.TransactionReference, checkoutUrl = result.CheckoutUrl });
     }
 
     /// <summary>Verify a payment with the provider and record it.</summary>

@@ -10,33 +10,41 @@ namespace FarmHand.Application.Features.Payments;
 /// <param name="VetRequestId">Vet request being paid for; must be accessible to the caller.</param>
 /// <param name="Amount">Amount to charge; must be greater than zero.</param>
 /// <param name="Currency">ISO currency code, for example "NGN".</param>
-public record InitiatePaymentCommand(Guid VetRequestId, decimal Amount, string Currency) : IRequest<string>;
+public record InitiatePaymentCommand(Guid VetRequestId, decimal Amount, string Currency) : IRequest<InitiatePaymentResult>;
 
-public class InitiatePaymentCommandHandler : IRequestHandler<InitiatePaymentCommand, string>
+public record InitiatePaymentResult(string TransactionReference, string? CheckoutUrl);
+
+public class InitiatePaymentCommandHandler : IRequestHandler<InitiatePaymentCommand, InitiatePaymentResult>
 {
     private readonly IPaymentService _paymentService;
     private readonly IPaymentRepository _paymentRepository;
     private readonly IUnitOfWork _unitOfWork;
     private readonly IResourceAuthorizationService _authorization;
+    private readonly ICurrentUserService _currentUser;
 
     public InitiatePaymentCommandHandler(
         IPaymentService paymentService,
         IPaymentRepository paymentRepository,
         IUnitOfWork unitOfWork,
-        IResourceAuthorizationService authorization)
+        IResourceAuthorizationService authorization,
+        ICurrentUserService currentUser)
     {
         _paymentService = paymentService;
         _paymentRepository = paymentRepository;
         _unitOfWork = unitOfWork;
         _authorization = authorization;
+        _currentUser = currentUser;
     }
 
-    public async Task<string> Handle(InitiatePaymentCommand request, CancellationToken ct)
+    public async Task<InitiatePaymentResult> Handle(InitiatePaymentCommand request, CancellationToken ct)
     {
         await _authorization.EnsureVetRequestAccessAsync(request.VetRequestId, ct);
 
+        var customerEmail = _currentUser.Email
+            ?? throw new InvalidOperationException("No authenticated customer email available to initialize payment.");
+
         var currency = request.Currency.Trim().ToUpperInvariant();
-        var result = await _paymentService.InitiatePaymentAsync(request.VetRequestId, request.Amount, currency, ct);
+        var result = await _paymentService.InitiatePaymentAsync(request.VetRequestId, request.Amount, currency, customerEmail, null, ct);
 
         if (!result.Success || string.IsNullOrWhiteSpace(result.TransactionReference))
             throw new InvalidOperationException(result.ErrorMessage ?? "Payment initiation failed.");
@@ -47,7 +55,7 @@ public class InitiatePaymentCommandHandler : IRequestHandler<InitiatePaymentComm
         await _paymentRepository.AddAsync(payment, ct);
         await _unitOfWork.SaveChangesAsync(ct);
 
-        return result.TransactionReference;
+        return new InitiatePaymentResult(result.TransactionReference, result.CheckoutUrl);
     }
 }
 
