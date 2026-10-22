@@ -3,7 +3,8 @@ namespace FarmHand.Application.Common.DTOs;
 /// <summary>Incident summary.</summary>
 /// <param name="Id">Incident id.</param>
 /// <param name="FarmId">Owning farm id.</param>
-/// <param name="FlockId">Affected flock id.</param>
+/// <param name="LivestockAnimalId">Affected animal id, when animal-level.</param>
+/// <param name="LivestockCategoryId">Affected category id, when flock-level.</param>
 /// <param name="DetectedAt">UTC detection timestamp.</param>
 /// <param name="IncidentType">Short incident classification.</param>
 /// <param name="Severity">Severity level (serialized as an integer).</param>
@@ -16,7 +17,8 @@ namespace FarmHand.Application.Common.DTOs;
 public record IncidentDto(
     Guid Id,
     Guid FarmId,
-    Guid FlockId,
+    Guid? LivestockAnimalId,
+    Guid? LivestockCategoryId,
     DateTime DetectedAt,
     string IncidentType,
     Domain.Enums.Severity Severity,

@@ -1,3 +1,4 @@
+using FarmHand.Application.Common.Interfaces;
 using FarmHand.Domain.Entities;
 using FarmHand.Domain.Interfaces;
 using MediatR;
@@ -17,17 +18,22 @@ public class RecordCostShareCommandHandler : IRequestHandler<RecordCostShareComm
 {
     private readonly ICostShareRepository _costShareRepository;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly IResourceAuthorizationService _authorization;
 
     public RecordCostShareCommandHandler(
         ICostShareRepository costShareRepository,
-        IUnitOfWork unitOfWork)
+        IUnitOfWork unitOfWork,
+        IResourceAuthorizationService authorization)
     {
         _costShareRepository = costShareRepository;
         _unitOfWork = unitOfWork;
+        _authorization = authorization;
     }
 
     public async Task<Unit> Handle(RecordCostShareCommand request, CancellationToken ct)
     {
+        await _authorization.EnsureVetRequestAccessAsync(request.VetRequestId, ct);
+
         var costShare = new CostShare(
             request.VetRequestId,
             request.PayerType,

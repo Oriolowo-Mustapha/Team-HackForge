@@ -1,6 +1,11 @@
 namespace FarmHand.Application.Common.Interfaces;
 
-public record PaymentResult(bool Success, string? TransactionReference, string? ErrorMessage);
+public record PaymentResult(
+    bool Success,
+    string? TransactionReference,
+    string? ErrorMessage,
+    decimal? Amount = null,
+    string? Currency = null);
 
 public interface IPaymentService
 {

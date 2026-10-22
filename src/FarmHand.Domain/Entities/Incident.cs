@@ -3,7 +3,8 @@ namespace FarmHand.Domain.Entities;
 public class Incident : BaseEntity
 {
     public Guid FarmId { get; protected set; }
-    public Guid FlockId { get; protected set; }
+    public Guid? LivestockAnimalId { get; protected set; }
+    public Guid? LivestockCategoryId { get; protected set; }
     public DateTime DetectedAt { get; protected set; }
     public string IncidentType { get; protected set; } = string.Empty;
     public Severity Severity { get; protected set; }
@@ -18,7 +19,8 @@ public class Incident : BaseEntity
 
     public Incident(
         Guid farmId,
-        Guid flockId,
+        Guid? livestockAnimalId,
+        Guid? livestockCategoryId,
         DateTime detectedAt,
         string incidentType,
         Severity severity,
@@ -27,7 +29,8 @@ public class Incident : BaseEntity
         string? ruleVersion = null)
     {
         FarmId = farmId;
-        FlockId = flockId;
+        LivestockAnimalId = livestockAnimalId;
+        LivestockCategoryId = livestockCategoryId;
         DetectedAt = detectedAt;
         IncidentType = incidentType;
         Severity = severity;

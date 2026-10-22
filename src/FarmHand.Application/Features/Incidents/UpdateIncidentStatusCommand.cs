@@ -1,13 +1,12 @@
-using FarmHand.Domain.Entities;
+﻿using FarmHand.Domain.Interfaces;
 using FarmHand.Domain.Enums;
-using FarmHand.Domain.Interfaces;
 using MediatR;
 
 namespace FarmHand.Application.Features.Incidents;
 
 /// <summary>Transitions an incident to a new status.</summary>
 /// <param name="IncidentId">Incident id; must match the route value.</param>
-/// <param name="NewStatus">Target status, sent as an integer (1-5). Open/unknown values are ignored.</param>
+/// <param name="NewStatus">Target status, sent as an integer (1-5). Open is not a valid target.</param>
 /// <param name="FollowUpDate">Optional follow-up date; defaults to now + 1 day for FollowUpRequired.</param>
 public record UpdateIncidentStatusCommand(Guid IncidentId, IncidentStatus NewStatus, DateTime? FollowUpDate = null) : IRequest;
 
@@ -15,19 +14,27 @@ public class UpdateIncidentStatusCommandHandler : IRequestHandler<UpdateIncident
 {
     private readonly IIncidentRepository _incidentRepository;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly Application.Common.Interfaces.IResourceAuthorizationService _authorization;
 
     public UpdateIncidentStatusCommandHandler(
         IIncidentRepository incidentRepository,
-        IUnitOfWork unitOfWork)
+        IUnitOfWork unitOfWork,
+        Application.Common.Interfaces.IResourceAuthorizationService authorization)
     {
         _incidentRepository = incidentRepository;
         _unitOfWork = unitOfWork;
+        _authorization = authorization;
     }
 
     public async Task<Unit> Handle(UpdateIncidentStatusCommand request, CancellationToken ct)
     {
+        if (!Enum.IsDefined(request.NewStatus) || request.NewStatus == IncidentStatus.Open)
+            throw new ArgumentException("A valid target status (1-5) is required.", nameof(request.NewStatus));
+
         var incident = await _incidentRepository.GetByIdAsync(request.IncidentId, ct)
             ?? throw new KeyNotFoundException($"Incident {request.IncidentId} not found.");
+
+        await _authorization.EnsureFarmAccessAsync(incident.FarmId, ct);
 
         switch (request.NewStatus)
         {
@@ -58,5 +65,8 @@ public class UpdateIncidentStatusCommandValidator : AbstractValidator<UpdateInci
     public UpdateIncidentStatusCommandValidator()
     {
         RuleFor(x => x.IncidentId).NotEqual(Guid.Empty);
+        RuleFor(x => x.NewStatus)
+            .IsInEnum()
+            .NotEqual(IncidentStatus.Open);
     }
 }

@@ -18,4 +18,9 @@ public class VetPartnerRepository : EfRepository<VetPartner>, IVetPartnerReposit
     {
         return await DbSet.Where(v => v.IsActive && !v.IsDeleted).ToListAsync(ct);
     }
+
+    public async Task<VetPartner?> GetByUserIdAsync(Guid userId, CancellationToken ct = default)
+    {
+        return await DbSet.FirstOrDefaultAsync(v => v.UserId == userId, ct);
+    }
 }

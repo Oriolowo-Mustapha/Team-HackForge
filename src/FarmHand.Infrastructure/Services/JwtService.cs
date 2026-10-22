@@ -17,10 +17,13 @@ public class JwtService : IJwtService
     public JwtService(IConfiguration configuration)
     {
         var jwtSection = configuration.GetSection("Jwt");
-        _secretKey = jwtSection["SecretKey"] ?? "FarmHandSuperSecretKey12345678901234567890";
+        _secretKey = jwtSection["SecretKey"]
+            ?? throw new InvalidOperationException("Jwt:SecretKey is required.");
         _issuer = jwtSection["Issuer"] ?? "FarmHand";
         _audience = jwtSection["Audience"] ?? "FarmHandUsers";
-        _expirationMinutes = int.Parse(jwtSection["ExpirationMinutes"] ?? "10080");
+        _expirationMinutes = int.TryParse(jwtSection["ExpirationMinutes"], out var minutes) && minutes > 0
+            ? minutes
+            : 60;
     }
 
     public TokenResult GenerateToken(string userId, string email, IEnumerable<string> roles)

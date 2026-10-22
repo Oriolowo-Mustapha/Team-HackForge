@@ -13,4 +13,9 @@ public class PaymentRepository : EfRepository<Payment>, IPaymentRepository
     {
         return await DbSet.Where(p => p.VetRequestId == vetRequestId).ToListAsync(ct);
     }
+
+    public async Task<Payment?> GetByTransactionReferenceAsync(string transactionReference, CancellationToken ct = default)
+    {
+        return await DbSet.FirstOrDefaultAsync(p => p.TransactionReference == transactionReference, ct);
+    }
 }

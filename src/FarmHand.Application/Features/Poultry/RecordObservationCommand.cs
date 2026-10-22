@@ -1,12 +1,12 @@
 using FarmHand.Application.Common.Interfaces;
 using FarmHand.Domain.Entities;
-using FarmHand.Domain.Enums;
 using FarmHand.Domain.Interfaces;
 using MediatR;
 
 namespace FarmHand.Application.Features.Poultry;
 
 /// <summary>Records a poultry observation from free text, optionally with an image.</summary>
+/// <param name="FarmId">Owning farm id; must belong to the caller.</param>
 /// <param name="LivestockAnimalId">Animal id for animal-level observations (optional for flock-level).</param>
 /// <param name="LivestockCategoryId">Category id for flock-level observations.</param>
 /// <param name="RawText">Farmer's raw text; sent to Gemini with Groq fallback.</param>
@@ -15,7 +15,8 @@ namespace FarmHand.Application.Features.Poultry;
 /// <param name="PreExtracted">Optional pre-extracted fields to avoid a second AI call.</param>
 /// <param name="PreAnalyzedVisionJson">Optional precomputed vision-analysis JSON.</param>
 public record RecordObservationCommand(
-    Guid LivestockAnimalId,
+    Guid FarmId,
+    Guid? LivestockAnimalId,
     Guid? LivestockCategoryId,
     string RawText,
     string IdempotencyKey,
@@ -29,26 +30,54 @@ public class RecordObservationCommandHandler : IRequestHandler<RecordObservation
     private readonly IVisionAnalysisService _visionService;
     private readonly IPoultryObservationRepository _observationRepository;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly IResourceAuthorizationService _authorization;
 
     public RecordObservationCommandHandler(
         IFarmAiService aiService,
         IVisionAnalysisService visionService,
         IPoultryObservationRepository observationRepository,
-        IUnitOfWork unitOfWork)
+        IUnitOfWork unitOfWork,
+        IResourceAuthorizationService authorization)
     {
         _aiService = aiService;
         _visionService = visionService;
         _observationRepository = observationRepository;
         _unitOfWork = unitOfWork;
+        _authorization = authorization;
     }
 
     public async Task<Guid> Handle(RecordObservationCommand request, CancellationToken ct)
     {
-        // Idempotency: if this key was already used, return existing observation
-        if (await _observationRepository.ExistsByIdempotencyKeyAsync(request.IdempotencyKey, ct))
+        await _authorization.EnsureFarmAccessAsync(request.FarmId, ct);
+
+        if (request.LivestockAnimalId is { } animalId)
         {
-            var existing = await _observationRepository.GetByIdempotencyKeyAsync(request.IdempotencyKey, ct);
-            return existing!.Id;
+            var animal = await _unitOfWork.LivestockAnimals.GetByIdAsync(animalId, ct)
+                ?? throw new KeyNotFoundException($"Animal {animalId} not found.");
+            if (animal.FarmId != request.FarmId)
+                throw new ArgumentException("The selected animal does not belong to this farm.");
+
+            if (request.LivestockCategoryId is { } animalCategoryId && animal.CategoryId != animalCategoryId)
+                throw new ArgumentException("The selected category does not match the animal.");
+        }
+        else if (request.LivestockCategoryId is { } categoryId)
+        {
+            var category = await _unitOfWork.LivestockCategories.GetByIdAsync(categoryId, ct)
+                ?? throw new KeyNotFoundException($"Category {categoryId} not found.");
+            if (category.FarmId != request.FarmId)
+                throw new ArgumentException("The selected category does not belong to this farm.");
+        }
+        else
+        {
+            throw new ArgumentException("Provide either a livestock animal or a category.");
+        }
+
+        // Idempotency: if this key was already used, return the existing observation
+        var existing = await _observationRepository.GetByIdempotencyKeyAsync(request.IdempotencyKey, ct);
+        if (existing is not null)
+        {
+            await _authorization.EnsureFarmAccessAsync(existing.FarmId, ct);
+            return existing.Id;
         }
 
         // Use pre-extracted data if provided (avoids double AI extraction from VoiceController)
@@ -84,6 +113,7 @@ public class RecordObservationCommandHandler : IRequestHandler<RecordObservation
         }
 
         var observation = new PoultryObservation(
+            request.FarmId,
             request.LivestockAnimalId,
             request.LivestockCategoryId,
             DateTime.UtcNow,
@@ -109,8 +139,17 @@ public class RecordObservationCommandValidator : AbstractValidator<RecordObserva
 {
     public RecordObservationCommandValidator()
     {
-        RuleFor(x => x.LivestockAnimalId).NotEqual(Guid.Empty).When(x => x.LivestockCategoryId is null);
+        RuleFor(x => x.FarmId).NotEqual(Guid.Empty);
+        RuleFor(x => x)
+            .Must(x => x.LivestockAnimalId is not null || x.LivestockCategoryId is not null)
+            .WithMessage("Provide either a livestock animal or a category.");
+        RuleFor(x => x.LivestockAnimalId)
+            .NotEqual(Guid.Empty)
+            .When(x => x.LivestockAnimalId is not null);
+        RuleFor(x => x.LivestockCategoryId)
+            .NotEqual(Guid.Empty)
+            .When(x => x.LivestockCategoryId is not null);
         RuleFor(x => x.RawText).NotEmpty().MaximumLength(2000);
-        RuleFor(x => x.IdempotencyKey).NotEmpty();
+        RuleFor(x => x.IdempotencyKey).NotEmpty().MaximumLength(128);
     }
 }

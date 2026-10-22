@@ -6,7 +6,10 @@ using Microsoft.AspNetCore.Mvc;
 namespace FarmHand.API.Controllers;
 
 /// <summary>Vet request, cost-share, and prevention-plan coordination.</summary>
-/// <remarks>No role checks are enforced: any authenticated caller can act as a vet.</remarks>
+/// <remarks>
+/// Farm owners can create vet requests and record cost shares. Responding to a request requires
+/// the Vet or Admin role, and a Vet can only respond as their own linked profile.
+/// </remarks>
 [ApiController]
 [Route("api/[controller]")]
 [Authorize]

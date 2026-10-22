@@ -16,8 +16,18 @@ public class Payment : BaseEntity
         Amount = amount;
     }
 
+    public void MarkPending(string transactionReference)
+    {
+        Status = "Pending";
+        TransactionReference = transactionReference;
+        MarkUpdated();
+    }
+
     public void MarkCompleted(string transactionReference)
     {
+        if (Status == "Completed" && TransactionReference == transactionReference)
+            return;
+
         Status = "Completed";
         TransactionReference = transactionReference;
         PaidAt = DateTime.UtcNow;

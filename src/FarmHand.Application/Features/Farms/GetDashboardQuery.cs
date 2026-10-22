@@ -11,11 +11,16 @@ public class GetDashboardQueryHandler : IRequestHandler<GetDashboardQuery, Dashb
 {
     private readonly IFarmRepository _farmRepository;
     private readonly IIncidentRepository _incidentRepository;
+    private readonly IResourceAuthorizationService _authorization;
 
-    public GetDashboardQueryHandler(IFarmRepository farmRepository, IIncidentRepository incidentRepository)
+    public GetDashboardQueryHandler(
+        IFarmRepository farmRepository,
+        IIncidentRepository incidentRepository,
+        IResourceAuthorizationService authorization)
     {
         _farmRepository = farmRepository;
         _incidentRepository = incidentRepository;
+        _authorization = authorization;
     }
 
     public async Task<DashboardDto?> Handle(GetDashboardQuery request, CancellationToken ct)
@@ -23,9 +28,11 @@ public class GetDashboardQueryHandler : IRequestHandler<GetDashboardQuery, Dashb
         var farm = await _farmRepository.GetByIdAsync(request.FarmId, ct);
         if (farm is null) return null;
 
+        await _authorization.EnsureFarmAccessAsync(request.FarmId, ct);
+
         var incidents = (await _incidentRepository.GetByFarmIdAsync(request.FarmId, ct))
             .Select(i => new IncidentDto(
-                i.Id, i.FarmId, i.FlockId, i.DetectedAt, i.IncidentType, i.Severity,
+                i.Id, i.FarmId, i.LivestockAnimalId, i.LivestockCategoryId, i.DetectedAt, i.IncidentType, i.Severity,
                 i.TriggeringObservations, i.EvidenceSummary, i.Status, i.RuleVersion, i.FollowUpDate, i.ResolvedAt))
             .ToList();
 

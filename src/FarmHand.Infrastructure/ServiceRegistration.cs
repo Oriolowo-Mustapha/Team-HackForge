@@ -43,17 +43,15 @@ public static class ServiceRegistration
         services.AddScoped<IFarmAiService, FarmAiService>();
 
         // Services
-        services.AddScoped<IPaymentService, NombaPaymentService>();
+        services.AddHttpClient<IPaymentService, NombaPaymentService>();
         services.AddScoped<IJwtService, JwtService>();
         services.AddHttpClient<YarnGptService>();
-        services.AddScoped<YarnGptService>();
-        services.AddHttpClient<CloudinaryService>();
-        services.AddScoped<ICloudinaryService, CloudinaryService>();
+        services.AddHttpClient<ICloudinaryService, CloudinaryService>();
         services.AddHttpClient<IGroqVisionService, GroqVisionService>();
-        services.AddScoped<IGroqVisionService, GroqVisionService>();
         services.AddScoped<IVisionAnalysisService, VisionAnalysisService>();
         services.AddScoped<IUserRepository, UserRepository>();
         services.AddScoped<IVetPartnerRepository, VetPartnerRepository>();
+        services.AddScoped<IDemoDataSeeder, DemoDataSeeder>();
 
         return services;
     }

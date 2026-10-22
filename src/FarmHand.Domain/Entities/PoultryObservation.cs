@@ -2,7 +2,8 @@ namespace FarmHand.Domain.Entities;
 
 public class PoultryObservation : BaseEntity
 {
-    public Guid LivestockAnimalId { get; protected set; }
+    public Guid FarmId { get; protected set; }
+    public Guid? LivestockAnimalId { get; protected set; }
     public Guid? LivestockCategoryId { get; protected set; } // for flock-level observations
     public DateTime RecordedAt { get; protected set; }
     public int MortalityCount { get; protected set; }
@@ -19,7 +20,8 @@ public class PoultryObservation : BaseEntity
     protected PoultryObservation() { }
 
     public PoultryObservation(
-        Guid livestockAnimalId,
+        Guid farmId,
+        Guid? livestockAnimalId,
         Guid? livestockCategoryId,
         DateTime recordedAt,
         int mortalityCount,
@@ -30,6 +32,7 @@ public class PoultryObservation : BaseEntity
         string? imageUrl = null,
         string? visionAnalysis = null)
     {
+        FarmId = farmId;
         LivestockAnimalId = livestockAnimalId;
         LivestockCategoryId = livestockCategoryId;
         RecordedAt = recordedAt;
