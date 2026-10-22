@@ -67,6 +67,12 @@ builder.Services.AddSwaggerGen(options =>
         }
     });
 
+    options.MapType<IFormFile>(() => new OpenApiSchema
+    {
+        Type = "string",
+        Format = "binary"
+    });
+
     foreach (var xmlFile in new[] { "FarmHand.API.xml", "FarmHand.Application.xml" })
     {
         var xmlPath = Path.Combine(AppContext.BaseDirectory, xmlFile);
@@ -139,20 +145,20 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseExceptionHandler(errorApp =>
-{
-    errorApp.Run(async context =>
     {
-        context.Response.StatusCode = 500;
-        context.Response.ContentType = "application/problem+json";
-        await context.Response.WriteAsJsonAsync(new
+        errorApp.Run(async context =>
         {
-            type = "https://farmhand.ai/problems/server-error",
-            title = "An error occurred while processing your request.",
-            status = 500,
-            detail = "Please check the server logs for more information."
+            context.Response.StatusCode = 500;
+            context.Response.ContentType = "application/problem+json";
+            await context.Response.WriteAsJsonAsync(new
+            {
+                type = "https://farmhand.ai/problems/server-error",
+                title = "An error occurred while processing your request.",
+                status = 500,
+                detail = "Please check the server logs for more information."
+            });
         });
     });
-});
 
 app.UseHttpsRedirection();
 

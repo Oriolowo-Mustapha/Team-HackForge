@@ -24,12 +24,10 @@ public class FarmAiService : IFarmAiService
     public async Task<ExtractedObservation> ExtractObservationAsync(string rawText, CancellationToken ct = default)
     {
         string? rawJson = null;
-        string? modelUsed = null;
 
         try
         {
             rawJson = await _geminiClient.ExtractObservationRawAsync(rawText, ct);
-            modelUsed = "Gemini";
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
         {
@@ -37,7 +35,6 @@ public class FarmAiService : IFarmAiService
             try
             {
                 rawJson = await _groqClient.ExtractObservationRawAsync(rawText, ct);
-                modelUsed = "Groq";
             }
             catch (Exception ex2)
             {

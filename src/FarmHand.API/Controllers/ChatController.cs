@@ -4,6 +4,7 @@ using FarmHand.Domain.Enums;
 using FarmHand.Infrastructure.Services;
 using MediatR;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 
 namespace FarmHand.API.Controllers;
@@ -43,14 +44,10 @@ public class ChatController : ControllerBase
     /// </summary>
     [HttpPost("observation")]
     public async Task<IActionResult> ChatObservation(
-        [FromForm] string rawText,
-        [FromForm] Guid livestockAnimalId,
-        [FromForm] Guid? livestockCategoryId = null,
-        [FromForm] IFormFile? audioFile = null,
-        [FromForm] IFormFile? imageFile = null,
+        [FromForm] ChatObservationRequest request,
         CancellationToken ct = default)
     {
-        string? transcript = rawText;
+        string? transcript = request.RawText;
         string? imageUrl = null;
         string? visionAnalysis = null;
         string? idempotencyKey = Guid.NewGuid().ToString();
@@ -58,10 +55,10 @@ public class ChatController : ControllerBase
         try
         {
             // 1. Handle voice input via YarnGPT STT
-            if (audioFile != null && audioFile.Length > 0)
+            if (request.AudioFile != null && request.AudioFile.Length > 0)
             {
-                using var audioStream = audioFile.OpenReadStream();
-                var sttResult = await _yarnGpt.TranscribeAudioAsync(audioStream, audioFile.FileName, idempotencyKey, ct);
+                using var audioStream = request.AudioFile.OpenReadStream();
+                var sttResult = await _yarnGpt.TranscribeAudioAsync(audioStream, request.AudioFile.FileName, idempotencyKey, ct);
                 transcript = sttResult.Transcript;
                 _logger.LogInformation("Chat STT completed");
             }
@@ -70,13 +67,13 @@ public class ChatController : ControllerBase
                 return BadRequest(new { error = "No text or audio provided." });
 
             // 2. Handle image upload via Cloudinary + Groq Vision
-            if (imageFile != null && imageFile.Length > 0)
+            if (request.ImageFile != null && request.ImageFile.Length > 0)
             {
-                using var imageStream = imageFile.OpenReadStream();
-                var uploadResult = await _cloudinary.UploadImageAsync(imageStream, imageFile.FileName, "farmhand/observations", ct);
+                using var imageStream = request.ImageFile.OpenReadStream();
+                var uploadResult = await _cloudinary.UploadImageAsync(imageStream, request.ImageFile.FileName, "farmhand/observations", ct);
                 imageUrl = uploadResult.SecureUrl;
 
-                var vision = await _visionService.AnalyzeImageAsync(imageUrl, rawText, ct);
+                var vision = await _visionService.AnalyzeImageAsync(imageUrl, request.RawText, ct);
                 visionAnalysis = System.Text.Json.JsonSerializer.Serialize(new
                 {
                     vision.Description,
@@ -87,7 +84,7 @@ public class ChatController : ControllerBase
             }
 
             // 3. Extract structured observation via Gemini (no incident created yet)
-            var extracted = await _aiService.ExtractObservationAsync(transcript ?? rawText, ct);
+            var extracted = await _aiService.ExtractObservationAsync(transcript ?? request.RawText, ct);
 
             // Range validation
             if (extracted.MortalityCount < 0 || extracted.MortalityCount > 10000)
@@ -97,8 +94,8 @@ public class ChatController : ControllerBase
             var observationPreview = new
             {
                 idempotencyKey,
-                livestockAnimalId,
-                livestockCategoryId,
+                request.LivestockAnimalId,
+                request.LivestockCategoryId,
                 transcript,
                 imageUrl,
                 visionAnalysis = visionAnalysis != null ? System.Text.Json.JsonSerializer.Deserialize<object>(visionAnalysis) : null,
@@ -204,3 +201,10 @@ public record CreateIncidentFromObservationRequest(
     string TriggeringObservations,
     string EvidenceSummary,
     string? RuleVersion = null);
+
+public record ChatObservationRequest(
+    string RawText,
+    Guid LivestockAnimalId,
+    Guid? LivestockCategoryId,
+    IFormFile? AudioFile = null,
+    IFormFile? ImageFile = null);

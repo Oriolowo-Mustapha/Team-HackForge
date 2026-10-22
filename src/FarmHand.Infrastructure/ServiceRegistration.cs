@@ -54,6 +54,7 @@ public static class ServiceRegistration
         services.AddScoped<IVisionAnalysisService, VisionAnalysisService>();
         services.AddScoped<IUserRepository, UserRepository>();
         services.AddScoped<IVetPartnerRepository, VetPartnerRepository>();
+        services.AddScoped<IDemoDataSeeder, DemoDataSeeder>();
 
         return services;
     }
