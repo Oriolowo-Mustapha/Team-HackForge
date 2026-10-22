@@ -136,11 +136,11 @@ public class AuthController : ControllerBase
 }
 
 public record RegisterRequest(
-    [property: Required, EmailAddress, MaxLength(255)] string Email,
-    [property: Required] string Password,
-    [property: MaxLength(200)] string? FullName,
-    [property: MaxLength(20)] string? PhoneNumber);
+    [Required, EmailAddress, MaxLength(255)] string Email,
+    [Required] string Password,
+    [MaxLength(200)] string? FullName,
+    [MaxLength(20)] string? PhoneNumber);
 
 public record LoginRequest(
-    [property: Required, EmailAddress, MaxLength(255)] string Email,
-    [property: Required] string Password);
+    [Required, EmailAddress, MaxLength(255)] string Email,
+    [Required] string Password);

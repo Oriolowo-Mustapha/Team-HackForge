@@ -54,7 +54,6 @@ public class DemoDataSeeder : IDemoDataSeeder
         if (farmer.FarmId != farm.Id)
         {
             farmer.AssignFarm(farm.Id);
-            _dbContext.Users.Update(farmer);
         }
 
         var poultryCategory = await EnsureCategoryAsync(farm.Id, "Poultry", "Laying birds flock");

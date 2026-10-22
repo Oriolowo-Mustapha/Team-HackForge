@@ -134,9 +134,9 @@ public class AdminController : ControllerBase
 }
 
 public record RegisterVetRequest(
-    [property: Required, EmailAddress, MaxLength(255)] string Email,
-    [property: Required] string TemporaryPassword,
-    [property: MaxLength(200)] string? FullName,
-    [property: Required, MaxLength(100)] string Specialization,
-    [property: Required, MaxLength(200)] string Contact,
-    [property: MaxLength(20)] string? PhoneNumber = null);
+    [Required, EmailAddress, MaxLength(255)] string Email,
+    [Required] string TemporaryPassword,
+    [MaxLength(200)] string? FullName,
+    [Required, MaxLength(100)] string Specialization,
+    [Required, MaxLength(200)] string Contact,
+    [MaxLength(20)] string? PhoneNumber = null);
