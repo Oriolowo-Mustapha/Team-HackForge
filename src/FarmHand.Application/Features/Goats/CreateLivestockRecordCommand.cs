@@ -6,20 +6,32 @@ using MediatR;
 
 namespace FarmHand.Application.Features.Goats;
 
-/// <summary>Creates a livestock record.</summary>
+/// <summary>Creates a livestock record with optional history fields.</summary>
 /// <param name="FarmId">Owning farm id; must belong to the caller.</param>
 /// <param name="CategoryId">Livestock category id (e.g. Poultry, Goats).</param>
 /// <param name="Species">Species, selected from a fixed dropdown.</param>
 /// <param name="AnimalName">Animal name or tag, selected from a fixed dropdown.</param>
 /// <param name="Sex">Sex of the animal.</param>
 /// <param name="ApproximateAge">Approximate age in months.</param>
+/// <param name="DiseaseHistory">Past illnesses and conditions.</param>
+/// <param name="RecentGestationDate">Most recent gestation/birthing date.</param>
+/// <param name="LastVeterinaryVisit">Last vet visit date.</param>
+/// <param name="Vaccinations">Comma-separated vaccination records.</param>
+/// <param name="LastLactationDate">Last lactation date (for dairy animals).</param>
+/// <param name="Parentage">Sire/dam or breeding line info.</param>
 public record CreateLivestockRecordCommand(
     Guid FarmId,
     Guid CategoryId,
     LivestockSpecies Species,
     AnimalName AnimalName,
     string Sex,
-    int? ApproximateAge) : IRequest<Guid>;
+    int? ApproximateAge,
+    string? DiseaseHistory = null,
+    DateTime? RecentGestationDate = null,
+    DateTime? LastVeterinaryVisit = null,
+    string? Vaccinations = null,
+    DateTime? LastLactationDate = null,
+    string? Parentage = null) : IRequest<Guid>;
 
 public class CreateLivestockRecordCommandHandler : IRequestHandler<CreateLivestockRecordCommand, Guid>
 {
@@ -53,7 +65,14 @@ public class CreateLivestockRecordCommandHandler : IRequestHandler<CreateLivesto
             request.Species.ToString(),
             null,
             request.ApproximateAge,
-            request.Sex);
+            request.Sex,
+            null,
+            request.DiseaseHistory,
+            request.RecentGestationDate,
+            request.LastVeterinaryVisit,
+            request.Vaccinations,
+            request.LastLactationDate,
+            request.Parentage);
 
         await _livestockRepository.AddAsync(record, ct);
         await _unitOfWork.SaveChangesAsync(ct);
@@ -71,5 +90,8 @@ public class CreateLivestockRecordCommandValidator : AbstractValidator<CreateLiv
         RuleFor(x => x.Species).IsInEnum();
         RuleFor(x => x.Sex).NotEmpty().MaximumLength(20);
         RuleFor(x => x.ApproximateAge).GreaterThanOrEqualTo(0).When(x => x.ApproximateAge is not null);
+        RuleFor(x => x.RecentGestationDate).LessThanOrEqualTo(DateTime.UtcNow).When(x => x.RecentGestationDate is not null);
+        RuleFor(x => x.LastVeterinaryVisit).LessThanOrEqualTo(DateTime.UtcNow).When(x => x.LastVeterinaryVisit is not null);
+        RuleFor(x => x.LastLactationDate).LessThanOrEqualTo(DateTime.UtcNow).When(x => x.LastLactationDate is not null);
     }
 }

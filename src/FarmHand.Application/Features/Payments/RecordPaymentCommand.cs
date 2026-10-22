@@ -6,7 +6,7 @@ namespace FarmHand.Application.Features.Payments;
 
 /// <summary>Verifies a pending payment reference and marks the payment completed.</summary>
 /// <param name="VetRequestId">Vet request being paid for.</param>
-/// <param name="Amount">Amount in NGN; must match the initiated payment.</param>
+/// <param name="Amount">Total amount paid (vet cost + platform commission).</param>
 /// <param name="Currency">ISO currency code; defaults to NGN.</param>
 /// <param name="TransactionReference">Provider reference created by the initiate endpoint.</param>
 public record RecordPaymentCommand(
@@ -46,7 +46,8 @@ public class RecordPaymentCommandHandler : IRequestHandler<RecordPaymentCommand>
 
         var currency = request.Currency.Trim().ToUpperInvariant();
 
-        if (payment.Amount.Amount != request.Amount || !string.Equals(payment.Amount.Currency, currency, StringComparison.OrdinalIgnoreCase))
+        // Validate against TotalAmount (vet cost + platform commission)
+        if (payment.TotalAmount.Amount != request.Amount || !string.Equals(payment.TotalAmount.Currency, currency, StringComparison.OrdinalIgnoreCase))
             throw new ArgumentException("Amount or currency does not match the initiated payment.");
 
         if (payment.Status == "Completed")
@@ -59,11 +60,11 @@ public class RecordPaymentCommandHandler : IRequestHandler<RecordPaymentCommand>
         if (!verification.Success)
             throw new InvalidOperationException(verification.ErrorMessage ?? "Payment verification failed.");
 
-        if (verification.Amount is { } verifiedAmount && verifiedAmount != payment.Amount.Amount)
+        if (verification.Amount is { } verifiedAmount && verifiedAmount != payment.TotalAmount.Amount)
             throw new InvalidOperationException("Verified amount does not match the initiated payment.");
 
         if (!string.IsNullOrWhiteSpace(verification.Currency)
-            && !string.Equals(verification.Currency, payment.Amount.Currency, StringComparison.OrdinalIgnoreCase))
+            && !string.Equals(verification.Currency, payment.TotalAmount.Currency, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("Verified currency does not match the initiated payment.");
 
         payment.MarkCompleted(request.TransactionReference);

@@ -7,6 +7,7 @@ public interface IUnitOfWork : IDisposable
     ILivestockAnimalRepository LivestockAnimals { get; }
     IPoultryObservationRepository PoultryObservations { get; }
     IIncidentRepository Incidents { get; }
+    IAIDiagnosisRepository AIDiagnoses { get; }
     IVetRequestRepository VetRequests { get; }
     ICostShareRepository CostShares { get; }
     IPaymentRepository Payments { get; }

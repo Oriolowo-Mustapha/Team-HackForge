@@ -39,7 +39,13 @@ public class GetLivestockRecordsQueryHandler : IRequestHandler<GetLivestockRecor
             a.AgeMonths,
             a.Gender,
             a.IsActive,
-            a.CreatedAt
+            a.CreatedAt,
+            a.DiseaseHistory,
+            a.RecentGestationDate,
+            a.LastVeterinaryVisit,
+            a.Vaccinations,
+            a.LastLactationDate,
+            a.Parentage
         )).ToList();
     }
 }

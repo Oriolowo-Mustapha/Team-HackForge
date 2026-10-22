@@ -18,6 +18,7 @@ public class FarmHandDbContext : DbContext
     public DbSet<VetRequest> VetRequests => Set<VetRequest>();
     public DbSet<CostShare> CostShares => Set<CostShare>();
     public DbSet<Payment> Payments => Set<Payment>();
+    public DbSet<AIDiagnosis> AIDiagnoses => Set<AIDiagnosis>();
     public DbSet<TreatmentPlan> TreatmentPlans => Set<TreatmentPlan>();
     public DbSet<TreatmentScheduleItem> TreatmentScheduleItems => Set<TreatmentScheduleItem>();
     public DbSet<FollowUp> FollowUps => Set<FollowUp>();
@@ -42,6 +43,7 @@ public class FarmHandDbContext : DbContext
         modelBuilder.ApplyConfiguration(new VetRequestConfiguration());
         modelBuilder.ApplyConfiguration(new CostShareConfiguration());
         modelBuilder.ApplyConfiguration(new PaymentConfiguration());
+        modelBuilder.ApplyConfiguration(new AIDiagnosisConfiguration());
         modelBuilder.ApplyConfiguration(new TreatmentPlanConfiguration());
         modelBuilder.ApplyConfiguration(new TreatmentScheduleItemConfiguration());
         modelBuilder.ApplyConfiguration(new FollowUpConfiguration());

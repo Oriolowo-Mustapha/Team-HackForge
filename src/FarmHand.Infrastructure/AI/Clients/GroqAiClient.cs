@@ -51,4 +51,34 @@ Do not include any text outside the JSON.";
 
         return text;
     }
+
+    public async Task<string> AssessSeverityRawAsync(string prompt, CancellationToken ct = default)
+    {
+        var requestBody = new
+        {
+            model = "mixtral-8x7b-32768",
+            messages = new[]
+            {
+                new { role = "user", content = prompt }
+            },
+            temperature = 0.1
+        };
+
+        var json = JsonSerializer.Serialize(requestBody);
+        var content = new StringContent(json, Encoding.UTF8, "application/json");
+
+        var response = await _httpClient.PostAsync("openai/v1/chat/completions", content, ct);
+        response.EnsureSuccessStatusCode();
+
+        var responseJson = await response.Content.ReadAsStringAsync(ct);
+        var doc = JsonDocument.Parse(responseJson);
+
+        var text = doc.RootElement
+            .GetProperty("choices")[0]
+            .GetProperty("message")
+            .GetProperty("content")
+            .GetString() ?? string.Empty;
+
+        return text;
+    }
 }

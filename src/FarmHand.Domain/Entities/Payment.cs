@@ -4,16 +4,23 @@ public class Payment : BaseEntity
 {
     public Guid VetRequestId { get; protected set; }
     public Money Amount { get; protected set; } = Money.Zero;
+    public Money PlatformCommission { get; protected set; } = Money.Zero;
+    public Money TotalAmount { get; protected set; } = Money.Zero;
+    public Money VetPayoutAmount { get; protected set; } = Money.Zero;
     public string Status { get; protected set; } = "Pending";
     public string TransactionReference { get; protected set; } = string.Empty;
     public DateTime? PaidAt { get; protected set; }
 
     protected Payment() { }
 
-    public Payment(Guid vetRequestId, Money amount)
+    public Payment(Guid vetRequestId, Money amount, decimal platformCommissionPercentage)
     {
         VetRequestId = vetRequestId;
         Amount = amount;
+        var commission = amount.Amount * platformCommissionPercentage / 100m;
+        PlatformCommission = new Money(commission, amount.Currency);
+        TotalAmount = new Money(amount.Amount + commission, amount.Currency);
+        VetPayoutAmount = amount;
     }
 
     public void MarkPending(string transactionReference)

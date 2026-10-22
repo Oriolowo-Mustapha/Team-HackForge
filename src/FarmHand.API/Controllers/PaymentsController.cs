@@ -67,7 +67,13 @@ public class PaymentsController : ControllerBase
             new InitiatePaymentCommand(request.VetRequestId, request.Amount, request.Currency),
             ct);
 
-        return Ok(new { transactionReference = result.TransactionReference, checkoutUrl = result.CheckoutUrl });
+        return Ok(new
+        {
+            transactionReference = result.TransactionReference,
+            checkoutUrl = result.CheckoutUrl,
+            platformCommission = result.PlatformCommission,
+            totalAmount = result.TotalAmount
+        });
     }
 
     /// <summary>Verify a payment with the provider and record it.</summary>

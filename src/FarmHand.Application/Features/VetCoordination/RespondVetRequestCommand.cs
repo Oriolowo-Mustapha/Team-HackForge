@@ -13,6 +13,7 @@ public class RespondVetRequestCommandHandler : IRequestHandler<RespondVetRequest
 {
     private readonly IVetRequestRepository _vetRequestRepository;
     private readonly IVetPartnerRepository _vetPartnerRepository;
+    private readonly IPaymentRepository _paymentRepository;
     private readonly IUnitOfWork _unitOfWork;
     private readonly IResourceAuthorizationService _authorization;
     private readonly ICurrentUserService _currentUser;
@@ -20,12 +21,14 @@ public class RespondVetRequestCommandHandler : IRequestHandler<RespondVetRequest
     public RespondVetRequestCommandHandler(
         IVetRequestRepository vetRequestRepository,
         IVetPartnerRepository vetPartnerRepository,
+        IPaymentRepository paymentRepository,
         IUnitOfWork unitOfWork,
         IResourceAuthorizationService authorization,
         ICurrentUserService currentUser)
     {
         _vetRequestRepository = vetRequestRepository;
         _vetPartnerRepository = vetPartnerRepository;
+        _paymentRepository = paymentRepository;
         _unitOfWork = unitOfWork;
         _authorization = authorization;
         _currentUser = currentUser;
@@ -37,6 +40,15 @@ public class RespondVetRequestCommandHandler : IRequestHandler<RespondVetRequest
 
         var vetRequest = await _vetRequestRepository.GetByIdAsync(request.VetRequestId, ct)
             ?? throw new KeyNotFoundException($"Vet request {request.VetRequestId} not found.");
+
+        // Pay before visit: a paid vet request must have a completed payment before it is accepted.
+        if (vetRequest.FarmerCost.Amount > 0)
+        {
+            var payments = await _paymentRepository.GetByVetRequestIdAsync(vetRequest.Id, ct);
+            if (!payments.Any(p => p.Status == "Completed"))
+                throw new InvalidOperationException(
+                    "Payment must be completed before the vet can accept this request.");
+        }
 
         var vetPartnerId = request.VetPartnerId;
 

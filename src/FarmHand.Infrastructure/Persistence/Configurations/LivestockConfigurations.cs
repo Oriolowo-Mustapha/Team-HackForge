@@ -31,6 +31,9 @@ public class LivestockAnimalConfiguration : IEntityTypeConfiguration<LivestockAn
         builder.Property(x => x.Breed).HasMaxLength(100);
         builder.Property(x => x.Gender).HasMaxLength(20);
         builder.Property(x => x.Notes).HasMaxLength(500);
+        builder.Property(x => x.DiseaseHistory).HasMaxLength(1000);
+        builder.Property(x => x.Vaccinations).HasMaxLength(500);
+        builder.Property(x => x.Parentage).HasMaxLength(500);
         builder.HasIndex(x => x.FarmId);
         builder.HasIndex(x => x.CategoryId);
         builder.HasIndex(x => x.Species);

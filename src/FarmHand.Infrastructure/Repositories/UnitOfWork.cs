@@ -12,6 +12,7 @@ public class UnitOfWork : IUnitOfWork
     public ILivestockAnimalRepository LivestockAnimals { get; }
     public IPoultryObservationRepository PoultryObservations { get; }
     public IIncidentRepository Incidents { get; }
+    public IAIDiagnosisRepository AIDiagnoses { get; }
     public IVetRequestRepository VetRequests { get; }
     public ICostShareRepository CostShares { get; }
     public IPaymentRepository Payments { get; }
@@ -32,6 +33,7 @@ public class UnitOfWork : IUnitOfWork
         LivestockAnimals = new LivestockAnimalRepository(dbContext);
         PoultryObservations = new PoultryObservationRepository(dbContext);
         Incidents = new IncidentRepository(dbContext);
+        AIDiagnoses = new AIDiagnosisRepository(dbContext);
         VetRequests = new VetRequestRepository(dbContext);
         CostShares = new CostShareRepository(dbContext);
         Payments = new PaymentRepository(dbContext);

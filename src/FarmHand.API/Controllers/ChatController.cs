@@ -136,7 +136,10 @@ public class ChatController : ControllerBase
     }
 
     /// <summary>Confirm a pending chat observation.</summary>
-    /// <remarks>Only the observation id and optional corrected notes are trusted. Does not create an incident unless a rule fires automatically.</remarks>
+    /// <remarks>
+    /// When the farmer confirms, the AI assesses severity using farm history. If severity is
+    /// High or Critical, an incident is auto-created and linked to the observation.
+    /// </remarks>
     /// <response code="200">Observation confirmed.</response>
     /// <response code="401">Missing or invalid bearer token.</response>
     /// <response code="403">The observation belongs to another user.</response>
@@ -151,11 +154,23 @@ public class ChatController : ControllerBase
         [FromBody] ConfirmChatObservationRequest request,
         CancellationToken ct)
     {
-        var result = await _mediator.Send(new ConfirmObservationCommand(observationId, request.CorrectedNotes), ct);
+        var result = await _mediator.Send(new ConfirmObservationCommand(
+            observationId,
+            request.CorrectedNotes,
+            request.OverrideSeverity,
+            request.OverrideReason), ct);
         return Ok(new
         {
             observationId = result.ObservationId,
             status = result.ConfirmationStatus,
+            aiSeverity = result.AiSeverity,
+            finalSeverity = result.FinalSeverity,
+            severityOverridden = result.SeverityOverridden,
+            aiDiagnosisSummary = result.AiDiagnosisSummary,
+            aiRecommendedAction = result.AiRecommendedAction,
+            aiRequiresVetConsultation = result.AiRequiresVetConsultation,
+            incidentAutoCreated = result.IncidentAutoCreated,
+            autoCreatedIncidentId = result.AutoCreatedIncidentId,
             autoCreatedIncidents = result.AutoCreatedIncidents
         });
     }
@@ -215,7 +230,10 @@ public class ChatController : ControllerBase
     }
 }
 
-public record ConfirmChatObservationRequest(string? CorrectedNotes);
+public record ConfirmChatObservationRequest(
+    string? CorrectedNotes,
+    FarmHand.Domain.Enums.Severity? OverrideSeverity = null,
+    string? OverrideReason = null);
 
 public record CreateIncidentFromObservationRequest(
     Severity Severity,

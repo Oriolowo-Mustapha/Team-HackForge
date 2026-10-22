@@ -53,4 +53,37 @@ Do not include any text outside the JSON.";
 
         return text;
     }
+
+    public async Task<string> AssessSeverityRawAsync(string prompt, CancellationToken ct = default)
+    {
+        var requestBody = new
+        {
+            contents = new[]
+            {
+                new
+                {
+                    parts = new[] { new { text = prompt } }
+                }
+            }
+        };
+
+        var json = JsonSerializer.Serialize(requestBody);
+        var content = new StringContent(json, Encoding.UTF8, "application/json");
+
+        var url = $"v1beta/models/gemini-1.5-flash:generateContent?key={_apiKey}";
+        var response = await _httpClient.PostAsync(url, content, ct);
+        response.EnsureSuccessStatusCode();
+
+        var responseJson = await response.Content.ReadAsStringAsync(ct);
+        var doc = JsonDocument.Parse(responseJson);
+
+        var text = doc.RootElement
+            .GetProperty("candidates")[0]
+            .GetProperty("content")
+            .GetProperty("parts")[0]
+            .GetProperty("text")
+            .GetString() ?? string.Empty;
+
+        return text;
+    }
 }

@@ -34,6 +34,7 @@ public static class ServiceRegistration
         services.AddScoped<IVetRequestRepository, VetRequestRepository>();
         services.AddScoped<ICostShareRepository, CostShareRepository>();
         services.AddScoped<IPaymentRepository, PaymentRepository>();
+        services.AddScoped<IAIDiagnosisRepository, AIDiagnosisRepository>();
         services.AddScoped<ITreatmentPlanRepository, TreatmentPlanRepository>();
         services.AddScoped<IFollowUpRepository, FollowUpRepository>();
         services.AddScoped<IPreventionPlanRepository, PreventionPlanRepository>();
@@ -43,6 +44,7 @@ public static class ServiceRegistration
         services.AddHttpClient<IGeminiAiClient, GeminiAiClient>();
         services.AddHttpClient<IGroqAiClient, GroqAiClient>();
         services.AddScoped<IFarmAiService, FarmAiService>();
+        services.AddScoped<IFarmHistoryService, FarmHistoryService>();
 
         // Services
         services.AddHttpClient<IPaymentService, FlutterwavePaymentService>();
