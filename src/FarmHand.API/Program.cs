@@ -3,6 +3,7 @@ using FarmHand.Application.Common.Behaviors;
 using FarmHand.Application.Common.Interfaces;
 using FarmHand.Application.Common.Services;
 using FarmHand.Application.Features.Farms;
+using FarmHand.Domain.Interfaces;
 using FarmHand.Infrastructure;
 using FarmHand.Infrastructure.Persistence;
 using FarmHand.Infrastructure.SeedData;
@@ -17,6 +18,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using Swashbuckle.AspNetCore.SwaggerUI;
+using System.Security.Claims;
 using System.Text;
 using System.Threading.RateLimiting;
 
@@ -115,6 +117,36 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             ValidIssuer = jwtSection["Issuer"] ?? "FarmHand",
             ValidAudience = jwtSection["Audience"] ?? "FarmHandUsers",
             IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secretKey))
+        };
+
+        // Reject tokens whose version no longer matches the user's current token version
+        // (e.g. after deactivation or revoke-all-sessions).
+        options.Events = new JwtBearerEvents
+        {
+            OnTokenValidated = async context =>
+            {
+                var userId = context.Principal?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                var tokenVersionClaim = context.Principal?.FindFirst("token_version")?.Value;
+                if (string.IsNullOrWhiteSpace(userId) || string.IsNullOrWhiteSpace(tokenVersionClaim))
+                {
+                    context.Fail("Invalid token.");
+                    return;
+                }
+
+                if (!int.TryParse(tokenVersionClaim, out var tokenVersion))
+                {
+                    context.Fail("Invalid token version.");
+                    return;
+                }
+
+                var unitOfWork = context.HttpContext.RequestServices.GetRequiredService<IUnitOfWork>();
+                var user = await unitOfWork.Users.GetByIdAsync(Guid.Parse(userId), context.HttpContext.RequestAborted);
+
+                if (user is null || !user.IsActive || user.TokenVersion != tokenVersion)
+                {
+                    context.Fail("Token revoked or user inactive.");
+                }
+            }
         };
     });
 

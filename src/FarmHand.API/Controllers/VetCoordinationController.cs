@@ -79,20 +79,42 @@ public class VetCoordinationController : ControllerBase
         return Ok();
     }
 
+    /// <summary>Create a prevention plan for an incident.</summary>
+    /// <param name="incidentId">Incident id; must equal the body IncidentId.</param>
+    /// <param name="command">Plan content.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <response code="201">Prevention plan created; body contains the new id.</response>
+    /// <response code="400">Route id does not match the body, or validation failed.</response>
+    /// <response code="401">Missing or invalid bearer token.</response>
+    /// <response code="403">The caller does not own the related farm.</response>
+    /// <response code="404">Incident not found.</response>
+    [HttpPost("incidents/{incidentId}/prevention-plan")]
+    [ProducesResponseType(StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> CreatePreventionPlan(Guid incidentId, [FromBody] CreatePreventionPlanCommand command, CancellationToken ct)
+    {
+        if (incidentId != command.IncidentId) return BadRequest();
+        var id = await _mediator.Send(command, ct);
+        return CreatedAtAction(nameof(GetPreventionPlan), new { incidentId }, new { id });
+    }
+
     /// <summary>Get the prevention plan for an incident.</summary>
     /// <param name="incidentId">Incident id.</param>
     /// <param name="ct">Cancellation token.</param>
-    /// <response code="200">Plan content wrapped as <c>{ "content": "..." }</c>.</response>
+    /// <response code="200">Prevention plan found.</response>
     /// <response code="401">Missing or invalid bearer token.</response>
     /// <response code="404">No prevention plan exists for this incident.</response>
     [HttpGet("incidents/{incidentId}/prevention-plan")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(PreventionPlanDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetPreventionPlan(Guid incidentId, CancellationToken ct)
     {
         var plan = await _mediator.Send(new GetPreventionPlanQuery(incidentId), ct);
         if (plan is null) return NotFound();
-        return Ok(new { content = plan });
+        return Ok(plan);
     }
 }

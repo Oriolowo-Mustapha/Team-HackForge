@@ -136,7 +136,7 @@ public class ChatController : ControllerBase
     }
 
     /// <summary>Confirm a pending chat observation.</summary>
-    /// <remarks>Only the observation id and optional corrected notes are trusted. Does not create an incident.</remarks>
+    /// <remarks>Only the observation id and optional corrected notes are trusted. Does not create an incident unless a rule fires automatically.</remarks>
     /// <response code="200">Observation confirmed.</response>
     /// <response code="401">Missing or invalid bearer token.</response>
     /// <response code="403">The observation belongs to another user.</response>
@@ -151,8 +151,13 @@ public class ChatController : ControllerBase
         [FromBody] ConfirmChatObservationRequest request,
         CancellationToken ct)
     {
-        await _mediator.Send(new ConfirmObservationCommand(observationId, request.CorrectedNotes), ct);
-        return Ok(new { observationId, status = nameof(ObservationConfirmationStatus.Confirmed) });
+        var result = await _mediator.Send(new ConfirmObservationCommand(observationId, request.CorrectedNotes), ct);
+        return Ok(new
+        {
+            observationId = result.ObservationId,
+            status = result.ConfirmationStatus,
+            autoCreatedIncidents = result.AutoCreatedIncidents
+        });
     }
 
     /// <summary>

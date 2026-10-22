@@ -24,6 +24,7 @@ public class FarmHandDbContext : DbContext
     public DbSet<PreventionPlan> PreventionPlans => Set<PreventionPlan>();
     public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
     public DbSet<User> Users => Set<User>();
+    public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
 
     public FarmHandDbContext(DbContextOptions<FarmHandDbContext> options) : base(options) { }
 
@@ -47,6 +48,7 @@ public class FarmHandDbContext : DbContext
         modelBuilder.ApplyConfiguration(new PreventionPlanConfiguration());
         modelBuilder.ApplyConfiguration(new AuditEventConfiguration());
         modelBuilder.ApplyConfiguration(new UserConfiguration());
+        modelBuilder.ApplyConfiguration(new RefreshTokenConfiguration());
     }
 
     public override async Task<int> SaveChangesAsync(CancellationToken ct = default)

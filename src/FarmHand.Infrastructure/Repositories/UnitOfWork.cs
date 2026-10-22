@@ -20,6 +20,9 @@ public class UnitOfWork : IUnitOfWork
     public IPreventionPlanRepository PreventionPlans { get; }
     public IUserRepository Users { get; }
     public IVetPartnerRepository VetPartners { get; }
+    public IIncidentActionRepository IncidentActions { get; }
+    public IAuditEventRepository AuditEvents { get; }
+    public IRefreshTokenRepository RefreshTokens { get; }
 
     public UnitOfWork(FarmHandDbContext dbContext)
     {
@@ -37,6 +40,9 @@ public class UnitOfWork : IUnitOfWork
         PreventionPlans = new PreventionPlanRepository(dbContext);
         Users = new UserRepository(dbContext);
         VetPartners = new VetPartnerRepository(dbContext);
+        IncidentActions = new IncidentActionRepository(dbContext);
+        AuditEvents = new AuditEventRepository(dbContext);
+        RefreshTokens = new RefreshTokenRepository(dbContext);
     }
 
     public async Task<int> SaveChangesAsync(CancellationToken ct = default)

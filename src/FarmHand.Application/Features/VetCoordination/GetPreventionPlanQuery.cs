@@ -5,9 +5,9 @@ using MediatR;
 
 namespace FarmHand.Application.Features.VetCoordination;
 
-public record GetPreventionPlanQuery(Guid IncidentId) : IRequest<string?>;
+public record GetPreventionPlanQuery(Guid IncidentId) : IRequest<PreventionPlanDto?>;
 
-public class GetPreventionPlanQueryHandler : IRequestHandler<GetPreventionPlanQuery, string?>
+public class GetPreventionPlanQueryHandler : IRequestHandler<GetPreventionPlanQuery, PreventionPlanDto?>
 {
     private readonly IPreventionPlanRepository _preventionPlanRepository;
     private readonly IResourceAuthorizationService _authorization;
@@ -20,10 +20,12 @@ public class GetPreventionPlanQueryHandler : IRequestHandler<GetPreventionPlanQu
         _authorization = authorization;
     }
 
-    public async Task<string?> Handle(GetPreventionPlanQuery request, CancellationToken ct)
+    public async Task<PreventionPlanDto?> Handle(GetPreventionPlanQuery request, CancellationToken ct)
     {
         await _authorization.EnsureIncidentAccessAsync(request.IncidentId, ct);
         var plan = await _preventionPlanRepository.GetByIncidentIdAsync(request.IncidentId, ct);
-        return plan?.Content;
+        if (plan is null) return null;
+
+        return new PreventionPlanDto(plan.Id, plan.IncidentId, plan.Content, plan.GeneratedFromHistory);
     }
 }

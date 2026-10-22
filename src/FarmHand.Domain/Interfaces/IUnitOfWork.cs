@@ -15,6 +15,9 @@ public interface IUnitOfWork : IDisposable
     IPreventionPlanRepository PreventionPlans { get; }
     IUserRepository Users { get; }
     IVetPartnerRepository VetPartners { get; }
+    IIncidentActionRepository IncidentActions { get; }
+    IAuditEventRepository AuditEvents { get; }
+    IRefreshTokenRepository RefreshTokens { get; }
 
     Task<int> SaveChangesAsync(CancellationToken ct = default);
 }

@@ -497,8 +497,9 @@ Returns `{ "content": "..." }`, `403` for another farm, or `404` when no plan ex
 ```
 
 Creates a pending `Payment` owned by the caller's farm and returns
-`{ "transactionReference": "..." }`. In `Simulated` mode the reference is HMAC-signed and no
-provider call is made; `Live` mode calls Nomba.
+`{ "transactionReference": "...", "checkoutUrl": "..." }`. The `checkoutUrl` is the Flutterwave
+checkout link the payer should be redirected to. In `Simulated` mode the reference is HMAC-signed
+and no provider call is made; `Live` mode calls Flutterwave.
 
 ### POST `/api/payments/record`
 
@@ -618,16 +619,15 @@ details are logged, not returned.
 | `Gemini:ApiKey` / `Groq:ApiKey` | Observation extraction and vision |
 | `YarnGpt:ApiKey` | Speech-to-text, text-to-speech, voices |
 | `Cloudinary:CloudName` / `ApiKey` / `ApiSecret` | Image uploads |
-| `Nomba:Mode` | `Simulated` (default) or `Live` |
-| `Nomba:ApiKey` / `SigningSecret` / `BaseUrl` | Nomba payment integration |
+| `Flutterwave:Mode` | `Simulated` (default) or `Live` |
+| `Flutterwave:SecretKey` / `PublicKey` / `SigningSecret` | Flutterwave payment integration |
+| `Flutterwave:BaseUrl` | API base URL, defaults `https://api.flutterwave.com/v3` |
+| `Flutterwave:RedirectUrl` | URL Flutterwave redirects to after payment |
+| `Flutterwave:WebhookSecretHash` | Secret hash used to verify incoming webhook signatures |
 
 ---
-
 ## Known limitations
 
-- `GET /api/goats/records` is a placeholder.
-- `DashboardDto.vetRequests` is always empty.
-- Incident listing has no pagination.
-- `CaseFileDto` and `PoultryObservationDto` exist but are not exposed by dedicated endpoints.
+- `CaseFileDto` exists but is not exposed by a dedicated endpoint.
 - The baseline migration assumes a pre-existing schema; `AdoptBaselineMigrationAsync` records
   the baseline when the database already contains the application tables.

@@ -5,12 +5,12 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using System.ComponentModel.DataAnnotations;
+using System.Security.Claims;
 
 namespace FarmHand.API.Controllers;
 
 [ApiController]
 [Route("api/auth")]
-[AllowAnonymous]
 [EnableRateLimiting("auth")]
 public class AuthController : ControllerBase
 {
@@ -35,6 +35,7 @@ public class AuthController : ControllerBase
     /// <response code="400">Validation failed or email already registered.</response>
     /// <response code="429">Too many attempts.</response>
     [HttpPost("register")]
+    [AllowAnonymous]
     [ProducesResponseType(StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status429TooManyRequests)]
@@ -78,6 +79,7 @@ public class AuthController : ControllerBase
     /// <response code="401">Invalid email or password, or the account is inactive.</response>
     /// <response code="429">Too many attempts.</response>
     [HttpPost("login")]
+    [AllowAnonymous]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status429TooManyRequests)]
@@ -92,7 +94,7 @@ public class AuthController : ControllerBase
         if (user is null || !user.IsActive || !passwordValid)
             return Unauthorized(new { error = "Invalid email or password." });
 
-        var token = _jwtService.GenerateToken(user.Id.ToString(), user.Email, new[] { user.Role });
+        var token = _jwtService.GenerateToken(user.Id.ToString(), user.Email, new[] { user.Role }, user.TokenVersion);
 
         return Ok(new
         {
@@ -103,6 +105,62 @@ public class AuthController : ControllerBase
             token = token.AccessToken,
             expiresAt = token.ExpiresAt
         });
+    }
+
+    /// <summary>Refresh an access token using a refresh token.</summary>
+    /// <response code="200">New access token issued.</response>
+    /// <response code="401">Refresh token invalid, expired, or revoked.</response>
+    [HttpPost("refresh")]
+    [AllowAnonymous]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    public async Task<IActionResult> Refresh([FromBody] RefreshRequest request, CancellationToken ct)
+    {
+        var existing = await _unitOfWork.RefreshTokens.GetByTokenAsync(request.RefreshToken, ct);
+        if (existing is null || !existing.IsActive)
+            return Unauthorized(new { error = "Invalid or expired refresh token." });
+
+        var user = await _userRepository.GetByIdAsync(existing.UserId, ct);
+        if (user is null || !user.IsActive)
+            return Unauthorized(new { error = "User account is inactive." });
+
+        var token = _jwtService.GenerateToken(user.Id.ToString(), user.Email, new[] { user.Role }, user.TokenVersion);
+
+        // Rotate the refresh token: revoke the old one and issue a new one.
+        existing.Revoke();
+        var newRefreshToken = new RefreshToken(existing.UserId, Guid.NewGuid().ToString("N"), DateTime.UtcNow.AddDays(7));
+        await _unitOfWork.RefreshTokens.AddAsync(newRefreshToken, ct);
+        await _unitOfWork.SaveChangesAsync(ct);
+
+        return Ok(new
+        {
+            message = "Token refreshed.",
+            userId = user.Id,
+            email = user.Email,
+            role = user.Role,
+            token = token.AccessToken,
+            refreshToken = newRefreshToken.Token,
+            expiresAt = token.ExpiresAt
+        });
+    }
+
+    /// <summary>Revoke all refresh tokens for the current user (logout everywhere).</summary>
+    /// <response code="200">All refresh tokens revoked.</response>
+    /// <response code="401">Missing or invalid bearer token.</response>
+    [HttpPost("revoke")]
+    [Authorize]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    public async Task<IActionResult> Revoke(CancellationToken ct)
+    {
+        var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (userIdClaim is null || !Guid.TryParse(userIdClaim, out var userId))
+            return Unauthorized();
+
+        await _unitOfWork.RefreshTokens.RevokeAllForUserAsync(userId, ct);
+        await _unitOfWork.SaveChangesAsync(ct);
+
+        return Ok(new { message = "All sessions revoked." });
     }
 
     private static bool PasswordMatches(string? password, string? passwordHash)
@@ -139,3 +197,5 @@ public record RegisterRequest(
 public record LoginRequest(
     [Required, EmailAddress, MaxLength(255)] string Email,
     [Required] string Password);
+
+public record RefreshRequest([Required] string RefreshToken);

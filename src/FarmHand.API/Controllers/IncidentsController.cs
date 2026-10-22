@@ -38,17 +38,19 @@ public class IncidentsController : ControllerBase
     }
 
     /// <summary>List incidents for a farm.</summary>
-    /// <remarks>Returns every incident for the farm, newest first. No pagination is applied.</remarks>
+    /// <remarks>Returns incidents for the farm, newest first, with pagination.</remarks>
     /// <param name="farmId">Farm id.</param>
+    /// <param name="page">1-based page number.</param>
+    /// <param name="pageSize">Number of items per page.</param>
     /// <param name="ct">Cancellation token.</param>
-    /// <response code="200">Incident list (may be empty).</response>
+    /// <response code="200">Paginated incident list.</response>
     /// <response code="401">Missing or invalid bearer token.</response>
     [HttpGet("{farmId}")]
-    [ProducesResponseType(typeof(List<IncidentDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(PagedResult<IncidentDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-    public async Task<IActionResult> GetIncidents(Guid farmId, CancellationToken ct)
+    public async Task<IActionResult> GetIncidents(Guid farmId, int page = 1, int pageSize = 20, CancellationToken ct = default)
     {
-        var incidents = await _mediator.Send(new GetIncidentsQuery(farmId), ct);
+        var incidents = await _mediator.Send(new GetIncidentsQuery(farmId, page, pageSize), ct);
         return Ok(incidents);
     }
 

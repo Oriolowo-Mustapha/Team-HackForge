@@ -11,15 +11,18 @@ public class GetDashboardQueryHandler : IRequestHandler<GetDashboardQuery, Dashb
 {
     private readonly IFarmRepository _farmRepository;
     private readonly IIncidentRepository _incidentRepository;
+    private readonly IVetRequestRepository _vetRequestRepository;
     private readonly IResourceAuthorizationService _authorization;
 
     public GetDashboardQueryHandler(
         IFarmRepository farmRepository,
         IIncidentRepository incidentRepository,
+        IVetRequestRepository vetRequestRepository,
         IResourceAuthorizationService authorization)
     {
         _farmRepository = farmRepository;
         _incidentRepository = incidentRepository;
+        _vetRequestRepository = vetRequestRepository;
         _authorization = authorization;
     }
 
@@ -36,6 +39,11 @@ public class GetDashboardQueryHandler : IRequestHandler<GetDashboardQuery, Dashb
                 i.TriggeringObservations, i.EvidenceSummary, i.Status, i.RuleVersion, i.FollowUpDate, i.ResolvedAt))
             .ToList();
 
+        var vetRequests = (await _vetRequestRepository.GetByFarmIdAsync(request.FarmId, ct))
+            .Select(v => new VetRequestDto(
+                v.Id, v.IncidentId, v.RequestType, v.Status, v.FarmerCost.Amount, v.RespondedAt))
+            .ToList();
+
         var actionPlan = new ActionPlanDto(
             incidents.Where(i => i.Severity == Domain.Enums.Severity.Critical || i.Severity == Domain.Enums.Severity.High)
                 .Select(i => $"Review incident {i.Id}: {i.IncidentType}").ToList(),
@@ -48,7 +56,6 @@ public class GetDashboardQueryHandler : IRequestHandler<GetDashboardQuery, Dashb
             new FarmDto(farm.Id, farm.OwnerId, farm.DisplayName, farm.Location, farm.CreatedAt),
             incidents,
             actionPlan,
-            new List<VetRequestDto>()
-        );
+            vetRequests);
     }
 }

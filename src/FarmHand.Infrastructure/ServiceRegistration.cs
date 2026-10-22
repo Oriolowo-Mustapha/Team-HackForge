@@ -1,4 +1,5 @@
 using FarmHand.Application.Common.Interfaces;
+using FarmHand.Application.Features.Poultry;
 using FarmHand.Domain.Interfaces;
 using FarmHand.Infrastructure.AI.Clients;
 using FarmHand.Infrastructure.AI.Services;
@@ -36,6 +37,7 @@ public static class ServiceRegistration
         services.AddScoped<ITreatmentPlanRepository, TreatmentPlanRepository>();
         services.AddScoped<IFollowUpRepository, FollowUpRepository>();
         services.AddScoped<IPreventionPlanRepository, PreventionPlanRepository>();
+        services.AddScoped<IPoultryRuleEngine, PoultryRuleEngine>();
 
         // AI Clients
         services.AddHttpClient<IGeminiAiClient, GeminiAiClient>();
@@ -51,6 +53,9 @@ public static class ServiceRegistration
         services.AddScoped<IVisionAnalysisService, VisionAnalysisService>();
         services.AddScoped<IUserRepository, UserRepository>();
         services.AddScoped<IVetPartnerRepository, VetPartnerRepository>();
+        services.AddScoped<IIncidentActionRepository, IncidentActionRepository>();
+        services.AddScoped<IAuditEventRepository, AuditEventRepository>();
+        services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
         services.AddScoped<IDemoDataSeeder, DemoDataSeeder>();
 
         return services;

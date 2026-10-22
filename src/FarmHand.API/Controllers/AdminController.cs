@@ -86,20 +86,40 @@ public class AdminController : ControllerBase
 
     /// <summary>List all registered vets. Admin only.</summary>
     [HttpGet("vets")]
-    public async Task<IActionResult> ListVets(CancellationToken ct)
+    public async Task<IActionResult> ListVets(int page = 1, int pageSize = 20, CancellationToken ct = default)
     {
-        var vets = await _vetPartnerRepository.GetAllAsync(ct);
-        return Ok(vets.Select(v => new
+        var vets = (await _vetPartnerRepository.GetAllAsync(ct))
+            .OrderByDescending(v => v.CreatedAt)
+            .ToList();
+
+        var totalCount = vets.Count;
+        var p = Math.Clamp(page, 1, int.MaxValue);
+        var ps = Math.Clamp(pageSize, 1, 100);
+        var totalPages = (int)Math.Ceiling(totalCount / (double)ps);
+
+        var pageItems = vets
+            .Skip((p - 1) * ps)
+            .Take(ps)
+            .Select(v => new
+            {
+                v.Id,
+                v.UserId,
+                v.Name,
+                v.Email,
+                v.Specialization,
+                v.Contact,
+                v.IsActive,
+                v.CreatedAt
+            });
+
+        return Ok(new
         {
-            v.Id,
-            v.UserId,
-            v.Name,
-            v.Email,
-            v.Specialization,
-            v.Contact,
-            v.IsActive,
-            v.CreatedAt
-        }));
+            items = pageItems,
+            page = p,
+            pageSize = ps,
+            totalCount,
+            totalPages
+        });
     }
 
     /// <summary>Deactivate a vet and their linked user account. Admin only.</summary>

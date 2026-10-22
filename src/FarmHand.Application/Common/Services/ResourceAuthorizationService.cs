@@ -15,6 +15,13 @@ public class ResourceAuthorizationService : IResourceAuthorizationService
         _unitOfWork = unitOfWork;
     }
 
+    private async Task<Guid?> GetCurrentVetPartnerIdAsync(CancellationToken ct)
+    {
+        if (_currentUser.UserId is null) return null;
+        var vetPartner = await _unitOfWork.VetPartners.GetByUserIdAsync(_currentUser.UserId.Value, ct);
+        return vetPartner?.Id;
+    }
+
     public async Task<bool> CanAccessFarmAsync(Guid farmId, CancellationToken ct = default)
     {
         if (_currentUser.IsAdmin) return true;
@@ -36,7 +43,16 @@ public class ResourceAuthorizationService : IResourceAuthorizationService
         var incident = await _unitOfWork.Incidents.GetByIdAsync(incidentId, ct)
             ?? throw new KeyNotFoundException($"Incident {incidentId} not found.");
 
-        if (_currentUser.IsVet) return;
+        if (_currentUser.IsVet)
+        {
+            var vetPartnerId = await GetCurrentVetPartnerIdAsync(ct);
+            if (vetPartnerId is not null)
+            {
+                var assigned = await _unitOfWork.VetRequests.GetByIncidentIdAsync(incidentId, ct);
+                if (assigned.Any(v => v.VetPartnerId == vetPartnerId)) return;
+            }
+        }
+
         await EnsureFarmAccessAsync(incident.FarmId, ct);
     }
 
@@ -52,7 +68,14 @@ public class ResourceAuthorizationService : IResourceAuthorizationService
         var vetRequest = await _unitOfWork.VetRequests.GetByIdAsync(vetRequestId, ct)
             ?? throw new KeyNotFoundException($"Vet request {vetRequestId} not found.");
 
-        if (_currentUser.IsAdmin || _currentUser.IsVet) return;
+        if (_currentUser.IsAdmin) return;
+
+        if (_currentUser.IsVet)
+        {
+            var vetPartnerId = await GetCurrentVetPartnerIdAsync(ct);
+            if (vetPartnerId is not null && vetRequest.VetPartnerId == vetPartnerId) return;
+            throw new UnauthorizedAccessException("You can only access vet requests assigned to you.");
+        }
 
         var incident = await _unitOfWork.Incidents.GetByIdAsync(vetRequest.IncidentId, ct)
             ?? throw new KeyNotFoundException($"Incident {vetRequest.IncidentId} not found.");

@@ -9,6 +9,7 @@ public class User : BaseEntity
     public string? PhoneNumber { get; protected set; }
     public Guid? FarmId { get; protected set; }
     public bool IsActive { get; protected set; } = true;
+    public int TokenVersion { get; protected set; } = 0;
 
     protected User() { }
 
@@ -44,6 +45,13 @@ public class User : BaseEntity
     public void Deactivate()
     {
         IsActive = false;
+        IncrementTokenVersion();
+        MarkUpdated();
+    }
+
+    public void IncrementTokenVersion()
+    {
+        TokenVersion++;
         MarkUpdated();
     }
 }

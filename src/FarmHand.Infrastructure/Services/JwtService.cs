@@ -26,7 +26,7 @@ public class JwtService : IJwtService
             : 60;
     }
 
-    public TokenResult GenerateToken(string userId, string email, IEnumerable<string> roles)
+    public TokenResult GenerateToken(string userId, string email, IEnumerable<string> roles, int tokenVersion = 0)
     {
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_secretKey));
         var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
@@ -36,7 +36,8 @@ public class JwtService : IJwtService
             new(ClaimTypes.NameIdentifier, userId),
             new(ClaimTypes.Email, email),
             new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
-            new(JwtRegisteredClaimNames.Iat, DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString())
+            new(JwtRegisteredClaimNames.Iat, DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString()),
+            new("token_version", tokenVersion.ToString())
         };
 
         claims.AddRange(roles.Select(r => new Claim(ClaimTypes.Role, r)));
@@ -53,9 +54,10 @@ public class JwtService : IJwtService
         return new TokenResult(tokenString, token.ValidTo);
     }
 
-    public bool ValidateToken(string token, out string? userId)
+    public bool ValidateToken(string token, out string? userId, out int? tokenVersion)
     {
         userId = null;
+        tokenVersion = null;
         try
         {
             var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_secretKey));
@@ -73,6 +75,9 @@ public class JwtService : IJwtService
             var handler = new JwtSecurityTokenHandler();
             var principal = handler.ValidateToken(token, validationParameters, out _);
             userId = principal.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var versionClaim = principal.FindFirst("token_version")?.Value;
+            if (int.TryParse(versionClaim, out var version))
+                tokenVersion = version;
             return true;
         }
         catch

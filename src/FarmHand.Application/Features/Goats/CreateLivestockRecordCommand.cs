@@ -1,4 +1,5 @@
 using FarmHand.Application.Common.Interfaces;
+using FarmHand.Domain.Enums;
 using FarmHand.Domain.Entities;
 using FarmHand.Domain.Interfaces;
 using MediatR;
@@ -8,15 +9,15 @@ namespace FarmHand.Application.Features.Goats;
 /// <summary>Creates a livestock record.</summary>
 /// <param name="FarmId">Owning farm id; must belong to the caller.</param>
 /// <param name="CategoryId">Livestock category id (e.g. Poultry, Goats).</param>
-/// <param name="Species">Species, for example "goat".</param>
-/// <param name="AnimalName">Animal name or tag.</param>
+/// <param name="Species">Species, selected from a fixed dropdown.</param>
+/// <param name="AnimalName">Animal name or tag, selected from a fixed dropdown.</param>
 /// <param name="Sex">Sex of the animal.</param>
 /// <param name="ApproximateAge">Approximate age in months.</param>
 public record CreateLivestockRecordCommand(
     Guid FarmId,
     Guid CategoryId,
-    string Species,
-    string AnimalName,
+    LivestockSpecies Species,
+    AnimalName AnimalName,
     string Sex,
     int? ApproximateAge) : IRequest<Guid>;
 
@@ -48,8 +49,8 @@ public class CreateLivestockRecordCommandHandler : IRequestHandler<CreateLivesto
         var record = new LivestockAnimal(
             request.FarmId,
             request.CategoryId,
-            request.AnimalName,
-            request.Species,
+            request.AnimalName.ToString(),
+            request.Species.ToString(),
             null,
             request.ApproximateAge,
             request.Sex);
@@ -66,8 +67,8 @@ public class CreateLivestockRecordCommandValidator : AbstractValidator<CreateLiv
     {
         RuleFor(x => x.FarmId).NotEqual(Guid.Empty);
         RuleFor(x => x.CategoryId).NotEqual(Guid.Empty);
-        RuleFor(x => x.Species).NotEmpty().MaximumLength(50);
-        RuleFor(x => x.AnimalName).NotEmpty().MaximumLength(100);
+        RuleFor(x => x.AnimalName).IsInEnum();
+        RuleFor(x => x.Species).IsInEnum();
         RuleFor(x => x.Sex).NotEmpty().MaximumLength(20);
         RuleFor(x => x.ApproximateAge).GreaterThanOrEqualTo(0).When(x => x.ApproximateAge is not null);
     }
