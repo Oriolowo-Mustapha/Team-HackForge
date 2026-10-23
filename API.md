@@ -270,9 +270,9 @@ The response has no JSON body.
 
 ### Refresh token behavior
 
-`POST /api/auth/refresh` accepts a refresh token and rotates it. However, **login does not currently create or return a refresh token**, so a client cannot obtain one through the normal login flow. In practice, clients should re-authenticate when the access token expires.
+`POST /api/auth/refresh` uses a rotating refresh token. On successful login the server creates a refresh token, stores only an SHA-256 hash of it, and returns the plaintext value once in the login response. Each refresh call revokes the current token and issues a new one.
 
-This is documented under [Known limitations](#known-limitations) and is not a frontend integration error.
+This replaces the previous limitation where login did not issue a refresh token.
 
 ---
 
@@ -318,7 +318,7 @@ Observation intake accepts a client-generated `idempotencyKey`:
 - Voice check-in: required query parameter.
 - Image check-in: required query parameter.
 
-Reusing a key returns the existing observation instead of creating a duplicate.
+Reusing a key returns the existing observation instead of creating a duplicate. Chat and voice retries are checked before STT, Cloudinary upload, or AI extraction, so a duplicate request does not trigger those paid calls. Reused responses include `"reused": true`; voice retries report `"creditsCharged": 0`.
 
 ### File uploads
 
@@ -618,6 +618,7 @@ Registers a farmer account. The role is always `Farmer`; a role cannot be suppli
   "email": "farmer@example.com",
   "role": "Farmer",
   "token": "eyJhbGciOiJIUzI1NiIs...",
+  "refreshToken": "9f2c...",
   "expiresAt": "2026-10-23T12:00:00Z"
 }
 ```
@@ -629,7 +630,7 @@ Registers a farmer account. The role is always `Farmer`; a role cannot be suppli
 | `401` | Invalid email or password, or inactive account. |
 | `429` | Rate limit exceeded. |
 
-The response does **not** include `refreshToken`.
+The response includes a hashed-backed `refreshToken` issued by the server.
 
 ---
 
@@ -664,7 +665,7 @@ The old refresh token is revoked and a new one is returned.
 | `401` | Invalid, expired, or revoked refresh token; inactive user. |
 | `429` | Rate limit exceeded. |
 
-See [Known limitations](#known-limitations): login does not issue a refresh token.
+Successful login now creates and returns a refresh token.
 
 ---
 
@@ -1586,6 +1587,7 @@ If `imageFile` is supplied, `visionAnalysis` is added to the observation.
 {
   "observationId": "b4e1...",
   "status": "Pending",
+  "reused": false,
   "farmId": "8d4b2f6e-...",
   "livestockAnimalId": null,
   "livestockCategoryId": "1c3a2b44-...",
@@ -1753,6 +1755,7 @@ Audio is transcribed by YarnGPT, then structured by Gemini/Groq.
 ```json
 {
   "observationId": "f0a1...",
+  "reused": false,
   "transcript": "Two goats are coughing and not eating",
   "extracted": {
     "mortalityCount": 0,
@@ -1801,6 +1804,7 @@ Audio is transcribed by YarnGPT, then structured by Gemini/Groq.
 ```json
 {
   "observationId": "cc12...",
+  "reused": false,
   "imageUrl": "https://res.cloudinary.com/...",
   "visionAnalysis": {
     "description": "Crowded poultry pen with wet litter",
@@ -2055,7 +2059,7 @@ Farm owners can create prevention plans; a vet without farm ownership cannot.
 | Field | Type | Required | Rules |
 | --- | --- | --- | --- |
 | `vetRequestId` | uuid | Yes | Must exist and be accessible. |
-| `authoredByVetId` | string | Yes | 1–255 characters. Client-supplied; the server does not verify it against the authenticated vet. |
+| `authoredByVetId` | string | Yes | 1–255 characters. For non-admin vets, this must be the authenticated vet's profile id and it is always overwritten server-side. An admin may supply another vet id, but it is normalized when the admin also has a vet profile. |
 | `instructionsText` | string | Yes | 1–2000 characters. |
 | `language` | string | No | Max 10. |
 
@@ -2079,7 +2083,7 @@ Farm owners can create prevention plans; a vet without farm ownership cannot.
 | Status | Reason |
 | --- | --- |
 | `400` | Validation failed. |
-| `403` | Caller cannot access the related incident. |
+| `403` | Caller cannot access the related incident, or the request is assigned to another vet. |
 | `404` | Vet request not found. |
 
 ---
@@ -2140,6 +2144,12 @@ Example: `farmerCost = 25,000 NGN` → commission `1,250`, total `26,250`, vet p
 | `amount` | decimal | Yes | Must equal the vet request's `farmerCost`. |
 | `currency` | string | Yes | 3–10 characters; must match the vet request currency (`NGN`). |
 
+**Headers**
+
+| Header | Required | Rules |
+| --- | --- | --- |
+| `Idempotency-Key` | No | Max 128 characters. Reusing the same key with the same vet request and details returns the existing pending payment instead of creating another one. |
+
 ```json
 {
   "vetRequestId": "3b7a...",
@@ -2157,9 +2167,15 @@ Example: `farmerCost = 25,000 NGN` → commission `1,250`, total `26,250`, vet p
   "platformCommission": 1250,
   "totalAmount": 26250,
   "vetPayoutAmount": 25000,
-  "vetSubaccountUsed": true
+  "vetSubaccountUsed": true,
+  "subaccountId": "4df9...",
+  "idempotencyKey": "a1b2c3d4e5f6"
 }
 ```
+
+If no `Idempotency-Key` header is sent, the server generates one and returns it. Clients should store and reuse it when retrying the same payment initiation.
+
+A vet request can have only one pending payment. Initiating again without a reuse of the same idempotency key returns the existing pending payment when the amount and currency match; otherwise it returns `409`.
 
 In **live mode**, `checkoutUrl` is the Flutterwave checkout link and `transactionReference` is the Flutterwave transaction ID.
 
@@ -2179,6 +2195,7 @@ If the assigned vet has a payout account, the payment is split automatically and
 | `400` | Validation failed, or amount/currency does not match the vet request. |
 | `403` | Vet request belongs to another farm, or no customer email is available. |
 | `404` | Vet request not found. |
+| `409` | The vet request is already completed or has a completed payment, or the idempotency key was reused with different details or a non-pending payment; another pending payment with different amount/currency exists for the same request. |
 | `502` | Payment provider unavailable or rejected the request. |
 
 ---
@@ -2250,7 +2267,7 @@ At least one header is required.
 - If `Flutterwave:WebhookSecretHash` is not configured: `503` (fail-closed).
 - Invalid or missing signature: `401` (empty body).
 - Invalid JSON after a valid signature: `400` with `{ "error": "Invalid webhook payload." }`.
-- Successful charge: verifies the transaction, finds the pending payment by Flutterwave ID or `tx_ref`, and marks it `Completed`.
+- Successful charge: verifies the transaction, finds the pending payment by Flutterwave ID or `tx_ref`, checks the verified amount and currency against the initiated payment, and only then marks it `Completed`.
 - Other events: `200` and ignored.
 
 **Response: `200 OK`** with empty body.
@@ -2263,13 +2280,13 @@ The webhook does not use the caller's bearer token.
 
 ### `POST /api/audit-events`
 
-Any authenticated user can create an audit event.
+Admin-restricted. The authenticated administrator's user id is always used as the actor id.
 
 **Body**
 
 | Field | Type | Required | Rules |
 | --- | --- | --- | --- |
-| `actorId` | string | Yes | 1–255 characters, client-supplied. |
+| `actorId` | string | Yes | 1–255 characters, accepted for compatibility but ignored. |
 | `eventType` | string | Yes | 1–100 characters. |
 | `relatedRecordId` | uuid | No | Optional. |
 | `details` | string | No | Max 1000. |
@@ -2319,7 +2336,7 @@ With neither filter, all events are returned.
 ]
 ```
 
-The audit endpoints are not admin-restricted, and `actorId` is not verified against the JWT.
+Writes are restricted to admins; reads remain available to any authenticated user. `actorId` is never trusted from the payload on write.
 
 ---
 
@@ -2605,7 +2622,7 @@ Brevo is used for vet credential emails:
 
 These are current implementation constraints, not frontend bugs.
 
-1. **Login does not return a refresh token.** `POST /api/auth/refresh` requires a refresh token, but login does not create one. Clients cannot use refresh after a normal login and should re-authenticate when the 60-minute access token expires.
+1. **Login returns a refresh token; the refresh token is stored only as an SHA-256 hash.** This is safe.
 2. **`POST /api/auth/revoke` does not invalidate the current access token.** It revokes refresh tokens only. Use change-password to invalidate all JWTs, or wait for expiry.
 3. **No vet-request completion endpoint.** `VetRequest.Complete()` exists, but no API calls it, so `RequestStatus.Completed` is unreachable through HTTP.
 4. **No observation read endpoints.** Observations can be created and confirmed, but not listed or fetched.
@@ -2613,7 +2630,7 @@ These are current implementation constraints, not frontend bugs.
 6. **No treatment-plan list endpoint.** Only create and get-by-id are exposed.
 7. **No incident-action completion endpoint.** Actions are created and listed, but remain `Pending`.
 8. **No vet-request list endpoint.** Vet requests appear only in the dashboard.
-9. **Audit events are not protected.** Any authenticated user can create and read audit events, and `actorId` is client-supplied and not checked against the JWT.
+9. **Audit event creation is admin-only; reads remain available to any authenticated user.** `actorId` is taken from the JWT, not the payload.
 10. **Payout account numbers are stored unencrypted.** They are masked in API responses, but not encrypted at rest.
 11. **`MustChangePassword` is not enforced.** Temporary vet passwords work until the vet changes them.
 12. **Treatment-plan authorship is not verified.** `authoredByVetId` is a free-text string supplied by the caller.

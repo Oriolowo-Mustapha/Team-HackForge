@@ -70,7 +70,8 @@ namespace FarmHand.Persistence.Migrations
 
                     b.HasIndex("IncidentId");
 
-                    b.HasIndex("ObservationId");
+                    b.HasIndex("ObservationId")
+                        .IsUnique();
 
                     b.HasIndex("Severity");
 
@@ -468,8 +469,16 @@ namespace FarmHand.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<string>("CheckoutUrl")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("IdempotencyKey")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
 
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean");
@@ -482,6 +491,10 @@ namespace FarmHand.Persistence.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("character varying(50)");
 
+                    b.Property<string>("SubaccountId")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
                     b.Property<string>("TransactionReference")
                         .IsRequired()
                         .HasMaxLength(200)
@@ -493,12 +506,23 @@ namespace FarmHand.Persistence.Migrations
                     b.Property<Guid>("VetRequestId")
                         .HasColumnType("uuid");
 
+                    b.Property<bool>("VetSubaccountUsed")
+                        .HasColumnType("boolean");
+
                     b.HasKey("Id");
 
                     b.HasIndex("TransactionReference")
                         .IsUnique();
 
                     b.HasIndex("VetRequestId");
+
+                    b.HasIndex("VetRequestId", "IdempotencyKey")
+                        .IsUnique()
+                        .HasFilter("\"IdempotencyKey\" IS NOT NULL");
+
+                    b.HasIndex("VetRequestId", "Status")
+                        .IsUnique()
+                        .HasFilter("\"Status\" = 'Pending'");
 
                     b.ToTable("Payments");
                 });
@@ -552,6 +576,10 @@ namespace FarmHand.Persistence.Migrations
 
                     b.Property<int>("MortalityCount")
                         .HasColumnType("integer");
+
+                    b.Property<string>("RawTranscript")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
 
                     b.Property<DateTime>("RecordedAt")
                         .HasColumnType("timestamp with time zone");

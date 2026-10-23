@@ -126,6 +126,7 @@ public class RecordObservationCommandHandler : IRequestHandler<RecordObservation
             visionAnalysis);
 
         observation.MarkAiExtracted(request.PreExtracted is not null ? "Gemini/Groq (pre-extracted)" : "Gemini/Groq + GroqVision");
+        observation.SetRawTranscript(request.RawText);
         observation.SetIdempotencyKey(request.IdempotencyKey);
 
         await _observationRepository.AddAsync(observation, ct);

@@ -17,18 +17,28 @@ public class CreateAuditEventCommandHandler : IRequestHandler<CreateAuditEventCo
 {
     private readonly IAuditEventRepository _auditRepository;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly ICurrentUserService _currentUser;
 
     public CreateAuditEventCommandHandler(
         IAuditEventRepository auditRepository,
-        IUnitOfWork unitOfWork)
+        IUnitOfWork unitOfWork,
+        ICurrentUserService currentUser)
     {
         _auditRepository = auditRepository;
         _unitOfWork = unitOfWork;
+        _currentUser = currentUser;
     }
 
     public async Task<Guid> Handle(CreateAuditEventCommand request, CancellationToken ct)
     {
-        var auditEvent = new AuditEvent(request.ActorId, request.EventType, request.RelatedRecordId, request.Details);
+        if (!_currentUser.IsAdmin)
+            throw new UnauthorizedAccessException("Only administrators can create audit events.");
+
+        var actorId = _currentUser.UserId is { } userId
+            ? userId.ToString()
+            : request.ActorId;
+
+        var auditEvent = new AuditEvent(actorId, request.EventType, request.RelatedRecordId, request.Details);
         await _auditRepository.AddAsync(auditEvent, ct);
         await _unitOfWork.SaveChangesAsync(ct);
         return auditEvent.Id;

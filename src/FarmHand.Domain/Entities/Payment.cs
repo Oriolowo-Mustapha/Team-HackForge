@@ -9,6 +9,10 @@ public class Payment : BaseEntity
     public Money VetPayoutAmount { get; protected set; } = Money.Zero;
     public string Status { get; protected set; } = "Pending";
     public string TransactionReference { get; protected set; } = string.Empty;
+    public string? CheckoutUrl { get; protected set; }
+    public string? IdempotencyKey { get; protected set; }
+    public string? SubaccountId { get; protected set; }
+    public bool VetSubaccountUsed { get; protected set; }
     public DateTime? PaidAt { get; protected set; }
 
     protected Payment() { }
@@ -23,10 +27,19 @@ public class Payment : BaseEntity
         VetPayoutAmount = amount;
     }
 
-    public void MarkPending(string transactionReference)
+    public void MarkPending(
+        string transactionReference,
+        string? checkoutUrl = null,
+        string? idempotencyKey = null,
+        bool vetSubaccountUsed = false,
+        string? subaccountId = null)
     {
         Status = "Pending";
         TransactionReference = transactionReference;
+        CheckoutUrl = checkoutUrl;
+        IdempotencyKey = idempotencyKey;
+        VetSubaccountUsed = vetSubaccountUsed;
+        SubaccountId = subaccountId;
         MarkUpdated();
     }
 

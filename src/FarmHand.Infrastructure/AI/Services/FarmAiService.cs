@@ -1,6 +1,7 @@
 using FarmHand.Application.Common.Interfaces;
 using FarmHand.Domain.Enums;
 using FarmHand.Infrastructure.AI.Clients;
+using FarmHand.Infrastructure.Services;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
@@ -28,14 +29,16 @@ public class FarmAiService : IFarmAiService
 
         try
         {
-            rawJson = await _geminiClient.ExtractObservationRawAsync(rawText, ct);
+            var requestText = AIInputGuard.Sanitize(rawText);
+            rawJson = await _geminiClient.ExtractObservationRawAsync(requestText, ct);
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
         {
             _logger.LogWarning(ex, "Gemini failed, falling back to Groq");
             try
             {
-                rawJson = await _groqClient.ExtractObservationRawAsync(rawText, ct);
+                var requestText = AIInputGuard.Sanitize(rawText);
+                rawJson = await _groqClient.ExtractObservationRawAsync(requestText, ct);
             }
             catch (Exception ex2)
             {
@@ -67,7 +70,22 @@ public class FarmAiService : IFarmAiService
         FarmHistoryContext? history,
         CancellationToken ct = default)
     {
-        var prompt = BuildAssessmentPrompt(rawText, farmerNotes, visionAnalysisJson, history);
+        var safeRawText = AIInputGuard.Sanitize(rawText);
+        var safeFarmerNotes = AIInputGuard.Sanitize(farmerNotes);
+        var safeVision = AIInputGuard.SanitizeFacts(visionAnalysisJson);
+        var safeHistory = history is null
+            ? null
+            : new FarmHistoryContext(
+                history.RecentObservations.Select(o => new RecentObservationSummary(
+                    o.Id,
+                    o.RecordedAt,
+                    o.MortalityCount,
+                    AIInputGuard.Sanitize(o.FarmerNotes),
+                    o.ImageUrl)).ToList(),
+                history.RecentIncidents.ToList(),
+                history.LivestockHistory.ToList());
+
+        var prompt = BuildAssessmentPrompt(safeRawText, safeFarmerNotes, safeVision, safeHistory);
 
         string? rawResponse = null;
 

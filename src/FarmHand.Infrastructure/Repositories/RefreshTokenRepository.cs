@@ -1,5 +1,6 @@
 using FarmHand.Domain.Entities;
 using FarmHand.Domain.Interfaces;
+using FarmHand.Domain.Services;
 using FarmHand.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 
@@ -11,7 +12,8 @@ public class RefreshTokenRepository : EfRepository<RefreshToken>, IRefreshTokenR
 
     public async Task<RefreshToken?> GetByTokenAsync(string token, CancellationToken ct = default)
     {
-        return await DbSet.FirstOrDefaultAsync(t => t.Token == token, ct);
+        var hashedToken = RefreshTokenHasher.HashToken(token);
+        return await DbSet.FirstOrDefaultAsync(t => t.Token == hashedToken, ct);
     }
 
     public async Task<IEnumerable<RefreshToken>> GetByUserIdAsync(Guid userId, CancellationToken ct = default)

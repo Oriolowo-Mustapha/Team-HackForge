@@ -7,7 +7,7 @@ public record Money
 
     public Money(decimal amount, string currency = "NGN")
     {
-        Amount = amount;
+        Amount = Math.Round(amount, 2, MidpointRounding.AwayFromZero);
         Currency = currency;
     }
 

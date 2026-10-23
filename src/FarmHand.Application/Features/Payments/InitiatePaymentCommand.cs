@@ -12,11 +12,13 @@ namespace FarmHand.Application.Features.Payments;
 /// <param name="Amount">Vet's charge amount; must be greater than zero.</param>
 /// <param name="Currency">ISO currency code, for example "NGN".</param>
 /// <param name="PlatformCommissionPercentage">Platform commission percentage, default 5%.</param>
+/// <param name="IdempotencyKey">Optional client key; reused keys return the existing pending payment.</param>
 public record InitiatePaymentCommand(
     Guid VetRequestId,
     decimal Amount,
     string Currency,
-    decimal PlatformCommissionPercentage = 5m) : IRequest<InitiatePaymentResult>;
+    decimal PlatformCommissionPercentage = 5m,
+    string? IdempotencyKey = null) : IRequest<InitiatePaymentResult>;
 
 public record InitiatePaymentResult(
     string TransactionReference,
@@ -24,7 +26,9 @@ public record InitiatePaymentResult(
     decimal PlatformCommission,
     decimal TotalAmount,
     decimal VetPayoutAmount,
-    bool VetSubaccountUsed);
+    bool VetSubaccountUsed,
+    string IdempotencyKey,
+    string? SubaccountId);
 
 public class InitiatePaymentCommandHandler : IRequestHandler<InitiatePaymentCommand, InitiatePaymentResult>
 {
@@ -58,6 +62,48 @@ public class InitiatePaymentCommandHandler : IRequestHandler<InitiatePaymentComm
         var vetRequest = await _vetRequestRepository.GetByIdAsync(request.VetRequestId, ct)
             ?? throw PublicException.NotFound("Vet request not found.");
 
+        if (vetRequest.Status == FarmHand.Domain.Enums.RequestStatus.Completed)
+            throw PublicException.Conflict("This vet request is already completed.");
+
+        var existingPayments = await _paymentRepository.GetByVetRequestIdAsync(vetRequest.Id, ct);
+        if (existingPayments.Any(p => p.Status == "Completed"))
+            throw PublicException.Conflict("This vet request has already been paid.");
+
+        var idempotencyKey = string.IsNullOrWhiteSpace(request.IdempotencyKey)
+            ? Guid.NewGuid().ToString("N")
+            : request.IdempotencyKey.Trim();
+
+        var existingPayment = existingPayments.FirstOrDefault(p => p.IdempotencyKey == idempotencyKey);
+        if (existingPayment is not null)
+        {
+            if (existingPayment.Amount.Amount != request.Amount
+                || !string.Equals(existingPayment.Amount.Currency, request.Currency.Trim(), StringComparison.OrdinalIgnoreCase))
+            {
+                throw PublicException.Conflict(
+                    "This idempotency key was already used with different payment details.");
+            }
+
+            if (existingPayment.Status != "Pending")
+                throw PublicException.Conflict(
+                    "This idempotency key was already used for a payment that is no longer pending. Use a new key.");
+
+            return ToResult(existingPayment);
+        }
+
+        // Avoid creating duplicate pending payments for the same vet request.
+        var pendingPayment = existingPayments.FirstOrDefault(p => p.Status == "Pending");
+        if (pendingPayment is not null)
+        {
+            if (pendingPayment.Amount.Amount == request.Amount
+                && string.Equals(pendingPayment.Amount.Currency, request.Currency.Trim(), StringComparison.OrdinalIgnoreCase))
+            {
+                return ToResult(pendingPayment);
+            }
+
+            throw PublicException.Conflict(
+                "This vet request already has a pending payment with different amount or currency. Use a new idempotency key and cancel the existing payment first.");
+        }
+
         var currency = request.Currency.Trim().ToUpperInvariant();
 
         // The vet request's farmer cost is authoritative; reject amount/currency tampering.
@@ -72,9 +118,9 @@ public class InitiatePaymentCommandHandler : IRequestHandler<InitiatePaymentComm
         var customerEmail = _currentUser.Email
             ?? throw PublicException.Forbidden("An authenticated customer email is required to initialize payment.");
 
-        // Platform commission is calculated on top of the vet's charge
-        var commission = request.Amount * request.PlatformCommissionPercentage / 100m;
-        var totalAmount = request.Amount + commission;
+        // Platform commission is calculated on top of the vet's charge and stored to 2 decimals.
+        var commission = Math.Round(request.Amount * request.PlatformCommissionPercentage / 100m, 2, MidpointRounding.AwayFromZero);
+        var totalAmount = Math.Round(request.Amount + commission, 2, MidpointRounding.AwayFromZero);
 
         // When the vet already has a payout subaccount, split the charge automatically.
         // The vet receives their full charge; the platform keeps the commission.
@@ -103,19 +149,24 @@ public class InitiatePaymentCommandHandler : IRequestHandler<InitiatePaymentComm
             throw PublicException.Upstream(result.ErrorMessage ?? "Payment could not be initialized. Please try again.");
 
         var payment = new Payment(request.VetRequestId, new Money(request.Amount, currency), request.PlatformCommissionPercentage);
-        payment.MarkPending(result.TransactionReference);
+        payment.MarkPending(result.TransactionReference, result.CheckoutUrl, idempotencyKey, split is not null, split?.SubaccountId);
 
         await _paymentRepository.AddAsync(payment, ct);
         await _unitOfWork.SaveChangesAsync(ct);
 
-        return new InitiatePaymentResult(
-            result.TransactionReference,
-            result.CheckoutUrl,
-            commission,
-            totalAmount,
-            request.Amount,
-            split is not null);
+        return ToResult(payment);
     }
+
+    private static InitiatePaymentResult ToResult(Payment payment) =>
+        new(
+            payment.TransactionReference,
+            payment.CheckoutUrl,
+            payment.PlatformCommission.Amount,
+            payment.TotalAmount.Amount,
+            payment.VetPayoutAmount.Amount,
+            payment.VetSubaccountUsed,
+            payment.IdempotencyKey ?? string.Empty,
+            payment.SubaccountId);
 }
 
 public class InitiatePaymentCommandValidator : AbstractValidator<InitiatePaymentCommand>
@@ -125,6 +176,7 @@ public class InitiatePaymentCommandValidator : AbstractValidator<InitiatePayment
         RuleFor(x => x.VetRequestId).NotEqual(Guid.Empty);
         RuleFor(x => x.Amount).GreaterThan(0);
         RuleFor(x => x.Currency).NotEmpty().Length(3).MaximumLength(10);
+        RuleFor(x => x.IdempotencyKey).MaximumLength(128).When(x => x.IdempotencyKey is not null);
         RuleFor(x => x.PlatformCommissionPercentage)
             .Equal(5m)
             .WithMessage("Platform commission is fixed at 5%.");

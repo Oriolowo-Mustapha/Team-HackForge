@@ -31,8 +31,17 @@ public class PaymentConfiguration : IEntityTypeConfiguration<Payment>
         });
         builder.Property(x => x.Status).HasMaxLength(50);
         builder.Property(x => x.TransactionReference).HasMaxLength(200);
+        builder.Property(x => x.CheckoutUrl).HasMaxLength(500);
+        builder.Property(x => x.IdempotencyKey).HasMaxLength(128);
+        builder.Property(x => x.SubaccountId).HasMaxLength(100);
         builder.HasIndex(x => x.VetRequestId);
         builder.HasIndex(x => x.TransactionReference).IsUnique();
+        builder.HasIndex(x => new { x.VetRequestId, x.Status })
+            .IsUnique()
+            .HasFilter("\"Status\" = 'Pending'");
+        builder.HasIndex(x => new { x.VetRequestId, x.IdempotencyKey })
+            .IsUnique()
+            .HasFilter("\"IdempotencyKey\" IS NOT NULL");
 
         builder.HasOne<VetRequest>()
             .WithMany()

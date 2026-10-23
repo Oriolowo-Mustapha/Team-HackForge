@@ -11,6 +11,7 @@ public class PoultryObservation : BaseEntity
     public string? FeedConsumption { get; protected set; }
     public string? EggProduction { get; protected set; }
     public string? FarmerNotes { get; protected set; }
+    public string? RawTranscript { get; protected set; }
     public string? ImageUrl { get; protected set; }
     public string? VisionAnalysis { get; protected set; }
     public ObservationConfirmationStatus ConfirmationStatus { get; protected set; }
@@ -71,6 +72,12 @@ public class PoultryObservation : BaseEntity
     public void SetIdempotencyKey(string key)
     {
         IdempotencyKey = key;
+        MarkUpdated();
+    }
+
+    public void SetRawTranscript(string rawTranscript)
+    {
+        RawTranscript = rawTranscript;
         MarkUpdated();
     }
 

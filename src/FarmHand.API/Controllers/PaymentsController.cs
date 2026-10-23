@@ -45,14 +45,17 @@ public class PaymentsController : ControllerBase
     /// (or the signed sandbox reference when <c>Flutterwave:Mode</c> is not <c>Live</c>).
     /// The response includes <c>checkoutUrl</c> which the caller should redirect the payer to.
     /// The reference must be passed to <c>POST /api/payments/record</c> after payment.
+    /// Pass an optional <c>Idempotency-Key</c> header to make retries safe; replaying the same key
+    /// with the same details returns the existing pending payment. A generated key is returned.
     /// </remarks>
     /// <param name="request">Vet request, amount, and currency.</param>
     /// <param name="ct">Cancellation token.</param>
-    /// <response code="200">Reference created; body contains <c>transactionReference</c> and <c>checkoutUrl</c>.</response>
+    /// <response code="200">Reference created; body contains <c>transactionReference</c>, <c>checkoutUrl</c>, and <c>idempotencyKey</c>.</response>
     /// <response code="400">Validation failed or the amount/currency does not match the vet request.</response>
     /// <response code="401">Missing or invalid bearer token.</response>
     /// <response code="403">The vet request belongs to another farm.</response>
     /// <response code="404">Vet request not found.</response>
+    /// <response code="409">The request is already paid/completed, or the idempotency key was reused with different details.</response>
     /// <response code="502">The payment provider is unavailable.</response>
     [HttpPost("initiate")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -60,13 +63,20 @@ public class PaymentsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
     [ProducesResponseType(StatusCodes.Status502BadGateway)]
     public async Task<IActionResult> InitiatePayment(
         [FromBody] InitiatePaymentRequest request,
         CancellationToken ct)
     {
+        var idempotencyKey = Request.Headers["Idempotency-Key"].FirstOrDefault();
+
         var result = await _mediator.Send(
-            new InitiatePaymentCommand(request.VetRequestId, request.Amount, request.Currency),
+            new InitiatePaymentCommand(
+                request.VetRequestId,
+                request.Amount,
+                request.Currency,
+                IdempotencyKey: string.IsNullOrWhiteSpace(idempotencyKey) ? null : idempotencyKey.Trim()),
             ct);
 
         return Ok(new
@@ -76,7 +86,9 @@ public class PaymentsController : ControllerBase
             platformCommission = result.PlatformCommission,
             totalAmount = result.TotalAmount,
             vetPayoutAmount = result.VetPayoutAmount,
-            vetSubaccountUsed = result.VetSubaccountUsed
+            vetSubaccountUsed = result.VetSubaccountUsed,
+            subaccountId = result.SubaccountId,
+            idempotencyKey = result.IdempotencyKey
         });
     }
 
@@ -115,7 +127,8 @@ public class PaymentsController : ControllerBase
     /// Flutterwave posts charge events here. The request is authenticated by the
     /// <c>flutterwave-signature</c> (HMAC-SHA256 of the raw body) or <c>verif-hash</c> header
     /// against <c>Flutterwave:WebhookSecretHash</c>. On a successful charge the matching pending
-    /// payment is marked completed; all other events are acknowledged with 200.
+    /// payment is marked completed only when the verified amount and currency match; all other
+    /// events are acknowledged with 200.
     /// </remarks>
     /// <param name="ct">Cancellation token.</param>
     /// <response code="200">Webhook acknowledged.</response>
@@ -183,11 +196,25 @@ public class PaymentsController : ControllerBase
                             ? await _paymentRepository.GetByTransactionReferenceAsync(txRef, ct)
                             : null);
 
-                    if (payment is not null && payment.Status != "Completed")
+                    if (payment is not null && payment.Status == "Pending")
                     {
-                        payment.MarkCompleted(flutterwaveId);
-                        await _unitOfWork.SaveChangesAsync(ct);
-                        _logger.LogInformation("Payment {TransactionReference} marked completed via webhook", flutterwaveId);
+                        var amountMatches = verification.Amount is { } verifiedAmount
+                            && verifiedAmount == payment.TotalAmount.Amount;
+                        var currencyMatches = !string.IsNullOrWhiteSpace(verification.Currency)
+                            && string.Equals(verification.Currency, payment.TotalAmount.Currency, StringComparison.OrdinalIgnoreCase);
+
+                        if (!amountMatches || !currencyMatches)
+                        {
+                            _logger.LogWarning(
+                                "Webhook payment {TransactionReference} did not match the initiated amount/currency; leaving it pending",
+                                flutterwaveId);
+                        }
+                        else
+                        {
+                            payment.MarkCompleted(flutterwaveId);
+                            await _unitOfWork.SaveChangesAsync(ct);
+                            _logger.LogInformation("Payment {TransactionReference} marked completed via webhook", flutterwaveId);
+                        }
                     }
                 }
             }

@@ -1,6 +1,7 @@
 using FarmHand.Application.Common.Interfaces;
 using FarmHand.Domain.Entities;
 using FarmHand.Domain.Interfaces;
+using FarmHand.Domain.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
@@ -95,6 +96,7 @@ public class AuthController : ControllerBase
             return Unauthorized(new { error = "Invalid email or password." });
 
         var token = _jwtService.GenerateToken(user.Id.ToString(), user.Email, new[] { user.Role }, user.TokenVersion);
+        var refreshTokenValue = await CreateRefreshTokenAsync(user.Id, ct);
 
         return Ok(new
         {
@@ -103,6 +105,7 @@ public class AuthController : ControllerBase
             email = user.Email,
             role = user.Role,
             token = token.AccessToken,
+            refreshToken = refreshTokenValue,
             expiresAt = token.ExpiresAt
         });
     }
@@ -128,7 +131,11 @@ public class AuthController : ControllerBase
 
         // Rotate the refresh token: revoke the old one and issue a new one.
         existing.Revoke();
-        var newRefreshToken = new RefreshToken(existing.UserId, Guid.NewGuid().ToString("N"), DateTime.UtcNow.AddDays(7));
+        var refreshTokenValue = Guid.NewGuid().ToString("N");
+        var newRefreshToken = new RefreshToken(
+            existing.UserId,
+            RefreshTokenHasher.HashToken(refreshTokenValue),
+            DateTime.UtcNow.AddDays(7));
         await _unitOfWork.RefreshTokens.AddAsync(newRefreshToken, ct);
         await _unitOfWork.SaveChangesAsync(ct);
 
@@ -139,7 +146,7 @@ public class AuthController : ControllerBase
             email = user.Email,
             role = user.Role,
             token = token.AccessToken,
-            refreshToken = newRefreshToken.Token,
+            refreshToken = refreshTokenValue,
             expiresAt = token.ExpiresAt
         });
     }
@@ -199,6 +206,18 @@ public class AuthController : ControllerBase
         await _unitOfWork.SaveChangesAsync(ct);
 
         return Ok(new { message = "Password changed. Please sign in again." });
+    }
+
+    private async Task<string> CreateRefreshTokenAsync(Guid userId, CancellationToken ct)
+    {
+        var refreshTokenValue = Guid.NewGuid().ToString("N");
+        var refreshToken = new RefreshToken(
+            userId,
+            RefreshTokenHasher.HashToken(refreshTokenValue),
+            DateTime.UtcNow.AddDays(7));
+        await _unitOfWork.RefreshTokens.AddAsync(refreshToken, ct);
+        await _unitOfWork.SaveChangesAsync(ct);
+        return refreshTokenValue;
     }
 
     private static bool PasswordMatches(string? password, string? passwordHash)

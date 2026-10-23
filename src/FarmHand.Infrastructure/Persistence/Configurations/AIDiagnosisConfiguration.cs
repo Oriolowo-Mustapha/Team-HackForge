@@ -13,7 +13,7 @@ public class AIDiagnosisConfiguration : IEntityTypeConfiguration<AIDiagnosis>
         builder.Property(x => x.DiagnosisSummary).IsRequired().HasMaxLength(1000);
         builder.Property(x => x.RecommendedAction).IsRequired().HasMaxLength(1000);
         builder.Property(x => x.RawAssessment).HasMaxLength(4000);
-        builder.HasIndex(x => x.ObservationId);
+        builder.HasIndex(x => x.ObservationId).IsUnique();
         builder.HasIndex(x => x.IncidentId);
         builder.HasIndex(x => x.Severity);
     }

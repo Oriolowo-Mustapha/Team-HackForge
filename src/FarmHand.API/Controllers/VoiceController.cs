@@ -1,5 +1,6 @@
 using FarmHand.Application.Common.Interfaces;
 using FarmHand.Application.Features.Poultry;
+using FarmHand.Domain.Interfaces;
 using FarmHand.Infrastructure.Services;
 using MediatR;
 using Microsoft.AspNetCore.Authorization;
@@ -19,6 +20,8 @@ public class VoiceController : ControllerBase
     private readonly IVisionAnalysisService _visionService;
     private readonly YarnGptService _yarnGpt;
     private readonly ICloudinaryService _cloudinary;
+    private readonly IPoultryObservationRepository _observationRepository;
+    private readonly IResourceAuthorizationService _authorization;
     private readonly ILogger<VoiceController> _logger;
 
     public VoiceController(
@@ -27,6 +30,8 @@ public class VoiceController : ControllerBase
         IVisionAnalysisService visionService,
         YarnGptService yarnGpt,
         ICloudinaryService cloudinary,
+        IPoultryObservationRepository observationRepository,
+        IResourceAuthorizationService authorization,
         ILogger<VoiceController> logger)
     {
         _mediator = mediator;
@@ -34,6 +39,8 @@ public class VoiceController : ControllerBase
         _visionService = visionService;
         _yarnGpt = yarnGpt;
         _cloudinary = cloudinary;
+        _observationRepository = observationRepository;
+        _authorization = authorization;
         _logger = logger;
     }
 
@@ -84,8 +91,33 @@ public class VoiceController : ControllerBase
         if (livestockAnimalId is null && livestockCategoryId is null)
             return BadRequest(new { error = "Provide either a livestock animal or a category." });
 
+        await _authorization.EnsureFarmAccessAsync(farmId, ct);
+
+        var key = idempotencyKey.Trim();
+        var existingObservation = await _observationRepository.GetByIdempotencyKeyAsync(key, ct);
+        if (existingObservation is not null)
+        {
+            await _authorization.EnsureFarmAccessAsync(existingObservation.FarmId, ct);
+            return Accepted(new
+            {
+                observationId = existingObservation.Id,
+                status = existingObservation.ConfirmationStatus.ToString(),
+                reused = true,
+                transcript = existingObservation.RawTranscript,
+                extracted = new
+                {
+                    existingObservation.MortalityCount,
+                    existingObservation.WaterConsumption,
+                    existingObservation.FeedConsumption,
+                    existingObservation.EggProduction,
+                    existingObservation.FarmerNotes
+                },
+                creditsCharged = 0
+            });
+        }
+
         using var audioStream = audioFile.OpenReadStream();
-        var sttResult = await _yarnGpt.TranscribeAudioAsync(audioStream, audioFile.FileName, idempotencyKey, ct);
+        var sttResult = await _yarnGpt.TranscribeAudioAsync(audioStream, audioFile.FileName, key, ct);
         _logger.LogInformation("YarnGPT STT completed for voice check-in");
 
         var extracted = await _aiService.ExtractObservationAsync(sttResult.Transcript, ct);
@@ -95,7 +127,7 @@ public class VoiceController : ControllerBase
             livestockAnimalId,
             livestockCategoryId,
             sttResult.Transcript,
-            idempotencyKey,
+            key,
             PreExtracted: extracted);
 
         var observationId = await _mediator.Send(command, ct);
@@ -103,6 +135,7 @@ public class VoiceController : ControllerBase
         return Accepted(new
         {
             observationId,
+            reused = false,
             transcript = sttResult.Transcript,
             extracted = new
             {
@@ -164,6 +197,33 @@ public class VoiceController : ControllerBase
         if (livestockAnimalId is null && livestockCategoryId is null)
             return BadRequest(new { error = "Provide either a livestock animal or a category." });
 
+        await _authorization.EnsureFarmAccessAsync(farmId, ct);
+
+        var key = idempotencyKey.Trim();
+        var existingObservation = await _observationRepository.GetByIdempotencyKeyAsync(key, ct);
+        if (existingObservation is not null)
+        {
+            await _authorization.EnsureFarmAccessAsync(existingObservation.FarmId, ct);
+            return Accepted(new
+            {
+                observationId = existingObservation.Id,
+                status = existingObservation.ConfirmationStatus.ToString(),
+                reused = true,
+                imageUrl = existingObservation.ImageUrl,
+                visionAnalysis = existingObservation.VisionAnalysis is null
+                    ? null
+                    : System.Text.Json.JsonSerializer.Deserialize<object>(existingObservation.VisionAnalysis),
+                extracted = new
+                {
+                    existingObservation.MortalityCount,
+                    existingObservation.WaterConsumption,
+                    existingObservation.FeedConsumption,
+                    existingObservation.EggProduction,
+                    existingObservation.FarmerNotes
+                }
+            });
+        }
+
         using var imageStream = imageFile.OpenReadStream();
         var uploadResult = await _cloudinary.UploadImageAsync(imageStream, imageFile.FileName, "farmhand/poultry", ct);
 
@@ -188,7 +248,7 @@ public class VoiceController : ControllerBase
             livestockAnimalId,
             livestockCategoryId,
             textForExtraction,
-            idempotencyKey,
+            key,
             uploadResult.SecureUrl,
             extracted,
             visionAnalysis);
@@ -198,6 +258,7 @@ public class VoiceController : ControllerBase
         return Accepted(new
         {
             observationId,
+            reused = false,
             imageUrl = uploadResult.SecureUrl,
             visionAnalysis = new
             {

@@ -13,6 +13,7 @@ public class PoultryObservationConfiguration : IEntityTypeConfiguration<PoultryO
         builder.Property(x => x.FeedConsumption).HasMaxLength(100);
         builder.Property(x => x.EggProduction).HasMaxLength(100);
         builder.Property(x => x.FarmerNotes).HasMaxLength(1000);
+        builder.Property(x => x.RawTranscript).HasMaxLength(2000);
         builder.Property(x => x.ImageUrl).HasMaxLength(500);
         builder.Property(x => x.VisionAnalysis).HasMaxLength(2000);
         builder.Property(x => x.IdempotencyKey).HasMaxLength(128);

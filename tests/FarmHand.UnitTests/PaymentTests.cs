@@ -8,7 +8,7 @@ public class PaymentTests
     [Fact]
     public void NewPayment_StartsPendingWithNoReference()
     {
-        var payment = new Payment(Guid.NewGuid(), new Money(5000));
+        var payment = new Payment(Guid.NewGuid(), new Money(5000), 5m);
 
         Assert.Equal("Pending", payment.Status);
         Assert.Equal(string.Empty, payment.TransactionReference);
@@ -18,7 +18,7 @@ public class PaymentTests
     [Fact]
     public void MarkPending_StoresReferenceWithoutCompleting()
     {
-        var payment = new Payment(Guid.NewGuid(), new Money(5000));
+        var payment = new Payment(Guid.NewGuid(), new Money(5000), 5m);
 
         payment.MarkPending("FH_ref");
 
@@ -28,9 +28,21 @@ public class PaymentTests
     }
 
     [Fact]
+    public void MarkPending_StoresCheckoutUrlAndIdempotencyKey()
+    {
+        var payment = new Payment(Guid.NewGuid(), new Money(5000), 5m);
+
+        payment.MarkPending("FH_ref", "https://checkout.example/pay", "client-key", true);
+
+        Assert.Equal("https://checkout.example/pay", payment.CheckoutUrl);
+        Assert.Equal("client-key", payment.IdempotencyKey);
+        Assert.True(payment.VetSubaccountUsed);
+    }
+
+    [Fact]
     public void MarkCompleted_IsIdempotentForSameReference()
     {
-        var payment = new Payment(Guid.NewGuid(), new Money(5000));
+        var payment = new Payment(Guid.NewGuid(), new Money(5000), 5m);
         payment.MarkCompleted("FH_ref");
         var firstPaidAt = payment.PaidAt;
 
@@ -43,7 +55,7 @@ public class PaymentTests
     [Fact]
     public void MarkCompleted_WithNewReferenceUpdatesReferenceAndTimestamp()
     {
-        var payment = new Payment(Guid.NewGuid(), new Money(5000));
+        var payment = new Payment(Guid.NewGuid(), new Money(5000), 5m);
         payment.MarkCompleted("FH_first");
         var firstPaidAt = payment.PaidAt;
 
@@ -56,7 +68,7 @@ public class PaymentTests
     [Fact]
     public void MarkFailed_SetsFailedStatus()
     {
-        var payment = new Payment(Guid.NewGuid(), new Money(5000));
+        var payment = new Payment(Guid.NewGuid(), new Money(5000), 5m);
 
         payment.MarkFailed();
 

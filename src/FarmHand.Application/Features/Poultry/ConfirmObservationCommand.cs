@@ -104,6 +104,17 @@ public class ConfirmObservationCommandHandler : IRequestHandler<ConfirmObservati
 
         observation.Confirm(request.CorrectedNotes);
 
+        // Re-check for a concurrent confirmation create just before doing expensive AI work.
+        var freshExistingDiagnosis = await _aiDiagnosisRepository.GetByObservationIdAsync(observation.Id, ct);
+        if (freshExistingDiagnosis is not null)
+        {
+            return await BuildExistingResultAsync(
+                observation,
+                freshExistingDiagnosis,
+                _incidentRepository,
+                ct);
+        }
+
         // Get farm history context for AI assessment
         var history = await _farmHistoryService.GetFarmHistoryAsync(observation.FarmId, ct);
 
@@ -125,6 +136,23 @@ public class ConfirmObservationCommandHandler : IRequestHandler<ConfirmObservati
             assessment.RawAssessment);
 
         await _aiDiagnosisRepository.AddAsync(aiDiagnosis, ct);
+
+        try
+        {
+            await _unitOfWork.SaveChangesAsync(ct);
+        }
+        catch (Exception ex) when (
+            ex.Message.Contains("duplicate key", StringComparison.OrdinalIgnoreCase)
+            || ex.InnerException?.Message.Contains("duplicate key", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            var concurrentDiagnosis = await _aiDiagnosisRepository.GetByObservationIdAsync(observation.Id, ct);
+            if (concurrentDiagnosis is not null)
+            {
+                return await BuildExistingResultAsync(observation, concurrentDiagnosis, _incidentRepository, ct);
+            }
+
+            throw;
+        }
 
         var autoCreated = new List<IncidentDto>();
         Guid? autoCreatedIncidentId = null;
@@ -188,6 +216,41 @@ public class ConfirmObservationCommandHandler : IRequestHandler<ConfirmObservati
             incidentAutoCreated,
             autoCreatedIncidentId,
             autoCreated);
+    }
+
+    private static async Task<ConfirmObservationResult> BuildExistingResultAsync(
+        PoultryObservation observation,
+        AIDiagnosis diagnosis,
+        IIncidentRepository incidentRepository,
+        CancellationToken ct)
+    {
+        var existingIncident = diagnosis.IncidentId is { } incidentId
+            ? await incidentRepository.GetByIdAsync(incidentId, ct)
+            : null;
+        var existingIncidents = existingIncident is null
+            ? new List<IncidentDto>()
+            : new List<IncidentDto>
+            {
+                new(existingIncident.Id, existingIncident.FarmId, existingIncident.LivestockAnimalId,
+                    existingIncident.LivestockCategoryId, existingIncident.DetectedAt,
+                    existingIncident.IncidentType, existingIncident.Severity,
+                    existingIncident.TriggeringObservations, existingIncident.EvidenceSummary,
+                    existingIncident.Status, existingIncident.RuleVersion,
+                    existingIncident.FollowUpDate, existingIncident.ResolvedAt)
+            };
+
+        return new ConfirmObservationResult(
+            observation.Id,
+            observation.ConfirmationStatus.ToString(),
+            diagnosis.Severity.ToString(),
+            existingIncident?.Severity.ToString() ?? diagnosis.Severity.ToString(),
+            existingIncident is not null && existingIncident.Severity != diagnosis.Severity,
+            diagnosis.DiagnosisSummary,
+            diagnosis.RecommendedAction,
+            diagnosis.RequiresVetConsultation,
+            diagnosis.IncidentCreated,
+            diagnosis.IncidentId,
+            existingIncidents);
     }
 }
 

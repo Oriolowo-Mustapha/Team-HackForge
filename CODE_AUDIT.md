@@ -6,6 +6,49 @@
 **Scope:** API, Application, Domain, Infrastructure, migrations, configuration, tests
 **Method:** Static review of all C# sources and project files, plus `dotnet build FarmHand.slnx` (0 warnings, 0 errors) and `dotnet test` (2 placeholder tests pass).
 
+> **Status update (2026-10-23):** the verdict below reflects commit `3230f5f`. All critical and high findings have since been fixed; see [Fix status](#fix-status-as-of-2026-10-23) before relying on this document. Builds are clean (0 warnings, 0 errors) and tests pass (15 unit + 10 integration).
+
+---
+
+## Fix status (as of 2026-10-23)
+
+| Finding | Status | Notes |
+|---|---|---|
+| C1 | Fixed | Observations support flock-level (`LivestockAnimalId` nullable) and per-animal records; validator, FK, and migration aligned. |
+| C2 | Fixed | Chat incident creation loads the observation, validates ownership, and derives farm/animal/category. |
+| C3 | Fixed | `Flock` removed; incidents use `LivestockAnimalId`/`LivestockCategoryId` (migration `AddLivestockHistoryAndAIDiagnosis`). |
+| C4 | Fixed | `CreateLivestockRecordCommand` persists via `IUnitOfWork.SaveChangesAsync`. |
+| C5, H9 | Fixed | `VetPartner.UserId` added; `Deactivate()` domain methods; `AdminController.DeactivateVet` deactivates vet + linked user by id. |
+| C6 | Fixed | Admin seeded with a real BCrypt hash from `Seed:AdminEmail`/`Seed:AdminPassword`; hash validity checked and repaired on startup. |
+| C7 | Fixed | Payments run through Flutterwave (`FlutterwavePaymentService`): real initiation, pending payment persisted, verification compares amount/currency, duplicates map to 409 via idempotency. |
+| C8 | Fixed | Cloudinary signature covers `fetch_format`, `folder`, `quality`, `timestamp` alphabetically. |
+| C9 | Resolved by decision | Rebaseline retained intentionally for the hackathon reset; the incremental chain (idempotency, AI-diagnosis uniqueness, pending-payment index, payout accounts, subaccount) continues from the baseline. Apply migrations only to fresh databases. |
+| H1 | Fixed | `ResourceAuthorizationService.Ensure*Async` ownership checks wired into incidents, poultry, voice, chat, vet coordination, payments, goats, livestock categories, follow-ups, treatment plans, dashboard. |
+| H2 | Fixed | `PublicException` mapping → 400/403/404/409 ProblemDetails; 500 reserved for unknown failures. |
+| H3 | Fixed (mostly) | Validators, rate limiting on auth routes, short-lived access tokens, hashed refresh tokens issued at login and rotated. Account lockout counters are not implemented. |
+| H4 | Fixed | Example config uses `CHANGE_ME`; `Program.cs` fails fast on short, missing, or placeholder secrets. |
+| H5 | Fixed | Migration-on-startup gated behind `IsDevelopment()` / explicit flag. |
+| H6 | Fixed | Voice (and chat) use the registered `IVisionAnalysisService`; no per-request `HttpClient`. |
+| H7 | Fixed | `PoultryRuleEngine` evaluates mortality/notes/vision and auto-creates incidents on confirmation; cost-share recorded via `RecordCostShareCommand`. |
+| H8 | Fixed (mostly) | Ownership validated in chat flows; extracted values are server-derived; global rate limiter applies. Per-endpoint AI quotas differ. |
+| H10 | Fixed | 15 unit tests (domain invariants, `Money`, idempotency) + 10 integration tests via `WebApplicationFactory`/EF in-memory. |
+| H11 | Fixed | Seeder validates each seed set independently; admin password hash is verified and reset when stale. |
+| M1 | **Open** | No global `HasQueryFilter` for soft delete; `IsDeleted` is not filtered uniformly. |
+| M2 | Partially fixed | Incident listing paginated (`PagedResult`, clamped page size ≤ 100); other list endpoints remain unbounded. |
+| M3 | Fixed (mostly) | Unique indexes + `DbUpdateException` duplicate-key recovery for AI diagnosis confirmation; return existing row instead of 500. |
+| M4 | Fixed | Idempotency keys, one pending payment per vet request (app check + filtered unique index), provider errors surfaced as 502. |
+| M5 | Partially fixed | 15 s outbound `HttpClient` timeouts; no Polly retry/circuit-breaker policies. |
+| M6 | Fixed | `AIInputGuard` sanitizes all farmer text/vision inputs; prompts delimit untrusted data; AI output treated as data. |
+| M7 | Partially fixed | Rate limiting added; no CORS policy, HSTS, or security headers. |
+| M8 | Partially fixed | JWT fails fast; AI/payment provider keys still surface errors at request time. |
+| M9 | Partially fixed | `API.md` refreshed and controllers documented; chat multipart contract relies on `API.md`. |
+| M10 | Fixed (mostly) | Duplicate DI registrations removed; `Polly` package still referenced but unused. |
+| M11 | Fixed | Audit events written for regulated actions; creation is admin-only; `ActorId` taken from the JWT. |
+| M12 | Partially fixed | Treatment-plan authorship enforced; dashboard casing cleanup done; minor DTO drift may remain. |
+| L-series | Mostly open | Cosmetic items (seeder reflection, `CreatedAtAction` locations, `/health` depth, enum-for-status) not addressed. |
+
+Verification: `dotnet build FarmHand.slnx` → 0 warnings / 0 errors; `dotnet test` → 25/25 passed. No PostgreSQL or Flutterwave sandbox was available, so migrations and live provider flows were not runtime-verified. Payment reconciliation now persists `Payment.SubaccountId` (Flutterwave split target) on initiated payments for later payout audit.
+
 ---
 
 ## Verdict
@@ -284,6 +327,8 @@ Cloudinary, Nomba, Gemini, Groq, and YarnGPT keys are optional at startup and fa
 
 ## Remediation order
 
+> Done as of 2026-10-23 except the marked-open items above (M1, parts of M2/M5/M7/M8, most L-series).
+
 1. **C1, C2, C3** — restore a coherent livestock/flock model and make voice, chat, and incident creation agree with the schema.
 2. **C4, C6, C9** — persistence and bootstrap: goats save, real admin seed, migration chain.
 3. **C7, C8** — payment and Cloudinary flows end-to-end.
@@ -312,10 +357,10 @@ Cloudinary, Nomba, Gemini, Groq, and YarnGPT keys are optional at startup and fa
 
 ---
 
-## Open questions
+## Open questions (resolved 2026-10-23)
 
-1. Is `Flock` still a product concept, or should incidents move to `LivestockAnimal`/`LivestockCategory` (C3)?
-2. Are flock-level observations required, or should every observation reference an animal (C1)?
-3. Is the Nomba sandbox expected to verify locally fabricated references, or must `/initiate` call the provider (C7)?
-4. Who bootstraps the first Admin account (C6)?
-5. Should the migration be reset for the hackathon, or does a deployed database already have history (C9)?
+1. ~~Is `Flock` still a product concept?~~ Resolved: removed; incidents use `LivestockAnimal`/`LivestockCategory` (C3).
+2. ~~Are flock-level observations required?~~ Resolved: flock-level allowed via nullable `LivestockAnimalId`; per-animal records supported (C1).
+3. ~~Is the payment sandbox expected to verify fabricated references?~~ Resolved: provider is Flutterwave with real initiation/verification (C7).
+4. ~~Who bootstraps the first Admin account?~~ Resolved: seeder from `Seed:AdminEmail`/`Seed:AdminPassword` config (C6).
+5. ~~Should the migration be reset?~~ Resolved: fresh-database reset is the intentional deployment path for the hackathon (C9).

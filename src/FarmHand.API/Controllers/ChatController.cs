@@ -74,9 +74,32 @@ public class ChatController : ControllerBase
         if (request.LivestockAnimalId is null && request.LivestockCategoryId is null)
             return BadRequest(new { error = "Provide either a livestock animal or a category." });
 
+        await _authorization.EnsureFarmAccessAsync(request.FarmId, ct);
+
         var key = string.IsNullOrWhiteSpace(request.IdempotencyKey)
             ? Guid.NewGuid().ToString("N")
             : request.IdempotencyKey.Trim();
+
+        var existingObservation = await _observationRepository.GetByIdempotencyKeyAsync(key, ct);
+        if (existingObservation is not null)
+        {
+            await _authorization.EnsureFarmAccessAsync(existingObservation.FarmId, ct);
+            return Accepted(new
+            {
+                observationId = existingObservation.Id,
+                status = existingObservation.ConfirmationStatus.ToString(),
+                reused = true,
+                request.FarmId,
+                request.LivestockAnimalId,
+                request.LivestockCategoryId,
+                transcript = existingObservation.RawTranscript,
+                imageUrl = existingObservation.ImageUrl,
+                visionAnalysis = existingObservation.VisionAnalysis is null
+                    ? null
+                    : System.Text.Json.JsonSerializer.Deserialize<object>(existingObservation.VisionAnalysis),
+                message = "Existing observation returned for this idempotency key."
+            });
+        }
 
         string? transcript = request.RawText;
 
@@ -125,6 +148,7 @@ public class ChatController : ControllerBase
         {
             observationId,
             status = nameof(ObservationConfirmationStatus.Pending),
+            reused = false,
             request.FarmId,
             request.LivestockAnimalId,
             request.LivestockCategoryId,
