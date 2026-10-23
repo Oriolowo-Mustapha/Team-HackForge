@@ -59,7 +59,8 @@ public static class ServiceRegistration
         services.AddScoped<IIncidentActionRepository, IncidentActionRepository>();
         services.AddScoped<IAuditEventRepository, AuditEventRepository>();
         services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
-        services.AddScoped<IEmailService, SmtpEmailService>();
+        services.AddHttpClient<IEmailService, BrevoEmailService>(client =>
+            client.Timeout = TimeSpan.FromSeconds(15));
         services.AddScoped<IDemoDataSeeder, DemoDataSeeder>();
 
         return services;
