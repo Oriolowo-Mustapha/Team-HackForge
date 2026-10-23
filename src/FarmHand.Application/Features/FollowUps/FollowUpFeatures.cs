@@ -34,7 +34,7 @@ public class CreateFollowUpCommandHandler : IRequestHandler<CreateFollowUpComman
         var incident = await _unitOfWork.Incidents.GetByIdAsync(request.IncidentId, ct)
             ?? throw new KeyNotFoundException($"Incident {request.IncidentId} not found.");
 
-        await _authorization.EnsureFarmAccessAsync(incident.FarmId, ct);
+        await _authorization.EnsureIncidentWriteAccessAsync(incident.Id, ct);
 
         var followUp = new FollowUp(request.IncidentId, request.FarmerResponse, request.Notes);
         await _followUpRepository.AddAsync(followUp, ct);
@@ -77,7 +77,7 @@ public class GetFollowUpsQueryHandler : IRequestHandler<GetFollowUpsQuery, List<
         var incident = await _incidentRepository.GetByIdAsync(request.IncidentId, ct)
             ?? throw new KeyNotFoundException($"Incident {request.IncidentId} not found.");
 
-        await _authorization.EnsureFarmAccessAsync(incident.FarmId, ct);
+        await _authorization.EnsureIncidentAccessAsync(incident.Id, ct);
 
         var followUps = await _followUpRepository.GetByIncidentIdAsync(request.IncidentId, ct);
 

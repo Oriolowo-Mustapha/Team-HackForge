@@ -1,5 +1,7 @@
 using FarmHand.Application.Common.DTOs;
+using FarmHand.Application.Common.Exceptions;
 using FarmHand.Application.Common.Interfaces;
+using FarmHand.Application.Common.Services;
 using FarmHand.Domain.Entities;
 using FarmHand.Domain.Enums;
 using FarmHand.Domain.Interfaces;
@@ -7,17 +9,28 @@ using MediatR;
 
 namespace FarmHand.Application.Features.Poultry;
 
-/// <summary>Confirms an AI-extracted observation, assesses severity with farm history,
-/// and auto-creates an incident when severity is High or Critical.</summary>
+/// <summary>
+/// Confirms a pending observation after the farmer has reviewed (and optionally corrected) it, then assesses
+/// severity using farm history. High or Critical severity automatically opens a health case (incident).
+/// Assessment never fails because of an AI outage: the rule-based triage is used and labelled instead.
+/// </summary>
 /// <param name="ObservationId">Observation id; must match the route value.</param>
 /// <param name="CorrectedNotes">Optional corrected notes that replace the extracted farmer notes.</param>
-/// <param name="OverrideSeverity">Optional farmer-supplied severity that replaces the AI severity.</param>
-/// <param name="OverrideReason">Optional reason for overriding the AI severity.</param>
+/// <param name="OverrideSeverity">Optional farmer-supplied severity that replaces the assessed severity.</param>
+/// <param name="OverrideReason">Optional reason for overriding the assessed severity.</param>
+/// <param name="MortalityCount">Optional corrected death count.</param>
+/// <param name="WaterConsumption">Optional corrected water note.</param>
+/// <param name="FeedConsumption">Optional corrected feed note.</param>
+/// <param name="EggProduction">Optional corrected egg note.</param>
 public record ConfirmObservationCommand(
     Guid ObservationId,
     string? CorrectedNotes,
-    FarmHand.Domain.Enums.Severity? OverrideSeverity = null,
-    string? OverrideReason = null) : IRequest<ConfirmObservationResult>;
+    Severity? OverrideSeverity = null,
+    string? OverrideReason = null,
+    int? MortalityCount = null,
+    string? WaterConsumption = null,
+    string? FeedConsumption = null,
+    string? EggProduction = null) : IRequest<ConfirmObservationResult>;
 
 public record ConfirmObservationResult(
     Guid ObservationId,
@@ -30,7 +43,9 @@ public record ConfirmObservationResult(
     bool AiRequiresVetConsultation,
     bool IncidentAutoCreated,
     Guid? AutoCreatedIncidentId,
-    List<IncidentDto> AutoCreatedIncidents);
+    List<IncidentDto> AutoCreatedIncidents,
+    string? AssessmentSource = null,
+    bool AssessmentIsAi = false);
 
 public class ConfirmObservationCommandHandler : IRequestHandler<ConfirmObservationCommand, ConfirmObservationResult>
 {
@@ -41,6 +56,7 @@ public class ConfirmObservationCommandHandler : IRequestHandler<ConfirmObservati
     private readonly IFarmHistoryService _farmHistoryService;
     private readonly IUnitOfWork _unitOfWork;
     private readonly IResourceAuthorizationService _authorization;
+    private readonly IAuditLogger _audit;
 
     public ConfirmObservationCommandHandler(
         IPoultryObservationRepository observationRepository,
@@ -49,7 +65,8 @@ public class ConfirmObservationCommandHandler : IRequestHandler<ConfirmObservati
         IFarmAiService aiService,
         IFarmHistoryService farmHistoryService,
         IUnitOfWork unitOfWork,
-        IResourceAuthorizationService authorization)
+        IResourceAuthorizationService authorization,
+        IAuditLogger audit)
     {
         _observationRepository = observationRepository;
         _incidentRepository = incidentRepository;
@@ -58,6 +75,7 @@ public class ConfirmObservationCommandHandler : IRequestHandler<ConfirmObservati
         _farmHistoryService = farmHistoryService;
         _unitOfWork = unitOfWork;
         _authorization = authorization;
+        _audit = audit;
     }
 
     public async Task<ConfirmObservationResult> Handle(ConfirmObservationCommand request, CancellationToken ct)
@@ -69,71 +87,54 @@ public class ConfirmObservationCommandHandler : IRequestHandler<ConfirmObservati
 
         // Idempotency: a repeated confirm must not re-run the AI or duplicate incidents.
         var existingDiagnosis = await _aiDiagnosisRepository.GetByObservationIdAsync(observation.Id, ct);
-        if (observation.ConfirmationStatus == FarmHand.Domain.Enums.ObservationConfirmationStatus.Confirmed
-            && existingDiagnosis is not null)
-        {
-            var existingIncident = existingDiagnosis.IncidentId is { } incidentId
-                ? await _incidentRepository.GetByIdAsync(incidentId, ct)
-                : null;
+        if (!observation.IsPending && existingDiagnosis is not null)
+            return await BuildExistingResultAsync(observation, existingDiagnosis, _incidentRepository, ct);
 
-            var existingIncidents = existingIncident is null
-                ? new List<IncidentDto>()
-                : new List<IncidentDto>
-                {
-                    new(existingIncident.Id, existingIncident.FarmId, existingIncident.LivestockAnimalId,
-                        existingIncident.LivestockCategoryId, existingIncident.DetectedAt,
-                        existingIncident.IncidentType, existingIncident.Severity,
-                        existingIncident.TriggeringObservations, existingIncident.EvidenceSummary,
-                        existingIncident.Status, existingIncident.RuleVersion,
-                        existingIncident.FollowUpDate, existingIncident.ResolvedAt)
-                };
+        if (!observation.IsPending)
+            throw PublicException.Conflict("This report has already been confirmed.");
 
-            return new ConfirmObservationResult(
-                observation.Id,
-                observation.ConfirmationStatus.ToString(),
-                existingDiagnosis.Severity.ToString(),
-                existingIncident?.Severity.ToString() ?? existingDiagnosis.Severity.ToString(),
-                existingIncident is not null && existingIncident.Severity != existingDiagnosis.Severity,
-                existingDiagnosis.DiagnosisSummary,
-                existingDiagnosis.RecommendedAction,
-                existingDiagnosis.RequiresVetConsultation,
-                existingDiagnosis.IncidentCreated,
-                existingDiagnosis.IncidentId,
-                existingIncidents);
-        }
+        var notes = request.CorrectedNotes;
+        var corrected = observation.ApplyCorrections(
+            request.MortalityCount,
+            request.WaterConsumption,
+            request.FeedConsumption,
+            request.EggProduction,
+            notes);
 
-        observation.Confirm(request.CorrectedNotes);
+        if (corrected) observation.Correct();
+        else observation.Confirm();
 
-        // Re-check for a concurrent confirmation create just before doing expensive AI work.
-        var freshExistingDiagnosis = await _aiDiagnosisRepository.GetByObservationIdAsync(observation.Id, ct);
-        if (freshExistingDiagnosis is not null)
-        {
-            return await BuildExistingResultAsync(
-                observation,
-                freshExistingDiagnosis,
-                _incidentRepository,
-                ct);
-        }
-
-        // Get farm history context for AI assessment
         var history = await _farmHistoryService.GetFarmHistoryAsync(observation.FarmId, ct);
+        var subject = await DescribeSubjectAsync(observation, ct);
 
-        // AI severity assessment using farm history
-        var assessment = await _aiService.AssessSeverityAsync(
-            observation.FarmerNotes ?? string.Empty,
+        var assessment = await _aiService.AssessSeverityAsync(new AssessmentInput(
+            observation.RawTranscript,
+            observation.MortalityCount,
+            observation.WaterConsumption,
+            observation.FeedConsumption,
+            observation.EggProduction,
             observation.FarmerNotes,
             observation.VisionAnalysis,
-            history,
-            ct);
+            subject.Description,
+            history), ct);
 
-        // Persist the AI diagnosis
+        // Rule-based triage can use the recorded flock size; AI results are kept as returned.
+        if (assessment.Source == RuleBasedAnalyzer.Source && subject.Headcount is > 0)
+        {
+            assessment = RuleBasedAnalyzer.Assess(new AssessmentInput(
+                observation.RawTranscript, observation.MortalityCount, observation.WaterConsumption,
+                observation.FeedConsumption, observation.EggProduction, observation.FarmerNotes,
+                observation.VisionAnalysis, subject.Description, history), subject.Headcount);
+        }
+
         var aiDiagnosis = new AIDiagnosis(
             observation.Id,
             assessment.Severity,
             assessment.DiagnosisSummary,
             assessment.RecommendedAction,
             assessment.RequiresVetConsultation,
-            assessment.RawAssessment);
+            assessment.RawAssessment,
+            assessment.Source);
 
         await _aiDiagnosisRepository.AddAsync(aiDiagnosis, ct);
 
@@ -147,32 +148,26 @@ public class ConfirmObservationCommandHandler : IRequestHandler<ConfirmObservati
         {
             var concurrentDiagnosis = await _aiDiagnosisRepository.GetByObservationIdAsync(observation.Id, ct);
             if (concurrentDiagnosis is not null)
-            {
                 return await BuildExistingResultAsync(observation, concurrentDiagnosis, _incidentRepository, ct);
-            }
-
             throw;
         }
 
         var autoCreated = new List<IncidentDto>();
         Guid? autoCreatedIncidentId = null;
-        bool incidentAutoCreated = false;
 
-        // Farmer override wins over the AI severity when supplied
-        var severityOverridden = request.OverrideSeverity.HasValue;
+        // Farmer override wins over the assessed severity when supplied.
+        var severityOverridden = request.OverrideSeverity.HasValue && request.OverrideSeverity != assessment.Severity;
         var finalSeverity = request.OverrideSeverity ?? assessment.Severity;
-        var requiresVetConsultation = finalSeverity is FarmHand.Domain.Enums.Severity.High or FarmHand.Domain.Enums.Severity.Critical;
+        var requiresVetConsultation = finalSeverity is Severity.High or Severity.Critical;
 
-        // Auto-create incident only when severity is High or Critical
-        if (finalSeverity is FarmHand.Domain.Enums.Severity.High or FarmHand.Domain.Enums.Severity.Critical)
+        // Business rule: only High or Critical severity opens a case automatically.
+        if (requiresVetConsultation)
         {
-            var evidence = $"Observation {observation.Id}: {assessment.DiagnosisSummary}";
+            var evidence = $"{subject.Name}: {assessment.DiagnosisSummary}";
             if (severityOverridden)
             {
-                var reason = string.IsNullOrWhiteSpace(request.OverrideReason)
-                    ? "no reason given"
-                    : request.OverrideReason.Trim();
-                evidence += $" [Farmer override: AI={assessment.Severity} -> {finalSeverity}; reason: {reason}]";
+                var reason = string.IsNullOrWhiteSpace(request.OverrideReason) ? "no reason given" : request.OverrideReason.Trim();
+                evidence += $" [Farmer override: assessed {assessment.Severity} -> {finalSeverity}; reason: {reason}]";
             }
 
             var incident = new Incident(
@@ -180,28 +175,23 @@ public class ConfirmObservationCommandHandler : IRequestHandler<ConfirmObservati
                 observation.LivestockAnimalId,
                 observation.LivestockCategoryId,
                 DateTime.UtcNow,
-                "AI Auto-Detected",
+                Mappers.IsAiSource(assessment.Source) ? "AI-assisted health alert" : "Health alert",
                 finalSeverity,
-                evidence,
-                observation.FarmerNotes ?? string.Empty,
-                "ai-assessment");
+                $"Observation {observation.Id}",
+                Truncate(evidence, 1000),
+                assessment.Source,
+                observation.Id);
 
             await _incidentRepository.AddAsync(incident, ct);
-            await _unitOfWork.SaveChangesAsync(ct);
-
-            // Link the incident to the AI diagnosis
             aiDiagnosis.LinkIncident(incident.Id);
+            await _audit.RecordAsync("incident.auto_created", incident.Id, $"severity={finalSeverity}; observation={observation.Id}", ct: ct);
 
             autoCreatedIncidentId = incident.Id;
-            incidentAutoCreated = true;
-
-            autoCreated.Add(new IncidentDto(
-                incident.Id, incident.FarmId, incident.LivestockAnimalId, incident.LivestockCategoryId,
-                incident.DetectedAt, incident.IncidentType, incident.Severity,
-                incident.TriggeringObservations, incident.EvidenceSummary, incident.Status,
-                incident.RuleVersion, incident.FollowUpDate, incident.ResolvedAt));
+            autoCreated.Add(incident.ToDto());
         }
 
+        await _audit.RecordAsync("observation.confirmed", observation.Id,
+            $"severity={finalSeverity}; source={assessment.Source}; corrected={corrected}", ct: ct);
         await _unitOfWork.SaveChangesAsync(ct);
 
         return new ConfirmObservationResult(
@@ -213,10 +203,29 @@ public class ConfirmObservationCommandHandler : IRequestHandler<ConfirmObservati
             assessment.DiagnosisSummary,
             assessment.RecommendedAction,
             requiresVetConsultation,
-            incidentAutoCreated,
+            autoCreatedIncidentId is not null,
             autoCreatedIncidentId,
-            autoCreated);
+            autoCreated,
+            assessment.Source,
+            Mappers.IsAiSource(assessment.Source));
     }
+
+    private sealed record SubjectInfo(string Name, string Description, int? Headcount);
+
+    private async Task<SubjectInfo> DescribeSubjectAsync(PoultryObservation observation, CancellationToken ct)
+    {
+        if (observation.LivestockAnimalId is { } animalId && await _unitOfWork.LivestockAnimals.GetByIdAsync(animalId, ct) is { } animal)
+            return new SubjectInfo(animal.Name, $"one {animal.Species.ToLowerInvariant()} named {animal.Name}", null);
+
+        if (observation.LivestockCategoryId is { } categoryId && await _unitOfWork.LivestockCategories.GetByIdAsync(categoryId, ct) is { } category)
+            return new SubjectInfo(category.Name,
+                $"the group \"{category.Name}\"" + (category.AnimalCount > 0 ? $" of {category.AnimalCount} {category.Species ?? "animals"}" : string.Empty),
+                category.AnimalCount > 0 ? category.AnimalCount : null);
+
+        return new SubjectInfo("Unspecified", "an unspecified animal", null);
+    }
+
+    private static string Truncate(string value, int max) => value.Length <= max ? value : value[..max];
 
     private static async Task<ConfirmObservationResult> BuildExistingResultAsync(
         PoultryObservation observation,
@@ -229,15 +238,7 @@ public class ConfirmObservationCommandHandler : IRequestHandler<ConfirmObservati
             : null;
         var existingIncidents = existingIncident is null
             ? new List<IncidentDto>()
-            : new List<IncidentDto>
-            {
-                new(existingIncident.Id, existingIncident.FarmId, existingIncident.LivestockAnimalId,
-                    existingIncident.LivestockCategoryId, existingIncident.DetectedAt,
-                    existingIncident.IncidentType, existingIncident.Severity,
-                    existingIncident.TriggeringObservations, existingIncident.EvidenceSummary,
-                    existingIncident.Status, existingIncident.RuleVersion,
-                    existingIncident.FollowUpDate, existingIncident.ResolvedAt)
-            };
+            : new List<IncidentDto> { existingIncident.ToDto() };
 
         return new ConfirmObservationResult(
             observation.Id,
@@ -250,7 +251,9 @@ public class ConfirmObservationCommandHandler : IRequestHandler<ConfirmObservati
             diagnosis.RequiresVetConsultation,
             diagnosis.IncidentCreated,
             diagnosis.IncidentId,
-            existingIncidents);
+            existingIncidents,
+            diagnosis.Source,
+            Mappers.IsAiSource(diagnosis.Source));
     }
 }
 
@@ -260,5 +263,11 @@ public class ConfirmObservationCommandValidator : AbstractValidator<ConfirmObser
     {
         RuleFor(x => x.ObservationId).NotEqual(Guid.Empty);
         RuleFor(x => x.OverrideReason).MaximumLength(1000);
+        RuleFor(x => x.CorrectedNotes).MaximumLength(1000);
+        RuleFor(x => x.OverrideSeverity).IsInEnum().When(x => x.OverrideSeverity is not null);
+        RuleFor(x => x.MortalityCount).InclusiveBetween(0, 10000).When(x => x.MortalityCount is not null);
+        RuleFor(x => x.WaterConsumption).MaximumLength(100);
+        RuleFor(x => x.FeedConsumption).MaximumLength(100);
+        RuleFor(x => x.EggProduction).MaximumLength(100);
     }
 }

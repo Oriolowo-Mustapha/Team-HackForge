@@ -57,4 +57,30 @@ public class FarmsController : ControllerBase
         if (dashboard is null) return NotFound();
         return Ok(dashboard);
     }
+
+    /// <summary>Farms owned by the caller, with headline counts.</summary>
+    [HttpGet]
+    [ProducesResponseType(typeof(IReadOnlyList<FarmSummaryDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> ListMine(CancellationToken ct) =>
+        Ok(await _mediator.Send(new GetMyFarmsQuery(), ct));
+
+    /// <summary>One farm with headline counts.</summary>
+    [HttpGet("{farmId:guid}")]
+    [ProducesResponseType(typeof(FarmSummaryDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> Get(Guid farmId, CancellationToken ct) =>
+        Ok(await _mediator.Send(new GetFarmQuery(farmId), ct));
+
+    /// <summary>Rename a farm or change its location.</summary>
+    [HttpPut("{farmId:guid}")]
+    [ProducesResponseType(typeof(FarmSummaryDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> Update(Guid farmId, [FromBody] UpdateFarmRequest request, CancellationToken ct) =>
+        Ok(await _mediator.Send(new UpdateFarmCommand(farmId, request.DisplayName, request.Location), ct));
+
+    /// <summary>Farmer home dashboard: counts, cases needing attention, reminders, recent activity and the next best action.</summary>
+    [HttpGet("{farmId:guid}/overview")]
+    [ProducesResponseType(typeof(FarmDashboardDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> Overview(Guid farmId, CancellationToken ct) =>
+        Ok(await _mediator.Send(new GetFarmOverviewQuery(farmId), ct));
 }
+
+public record UpdateFarmRequest(string DisplayName, string Location);

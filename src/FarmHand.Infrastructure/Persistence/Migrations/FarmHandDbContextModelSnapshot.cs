@@ -63,6 +63,10 @@ namespace FarmHand.Persistence.Migrations
                     b.Property<int>("Severity")
                         .HasColumnType("integer");
 
+                    b.Property<string>("Source")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -273,6 +277,9 @@ namespace FarmHand.Persistence.Migrations
                     b.Property<int>("Severity")
                         .HasColumnType("integer");
 
+                    b.Property<Guid?>("SourceObservationId")
+                        .HasColumnType("uuid");
+
                     b.Property<int>("Status")
                         .HasColumnType("integer");
 
@@ -291,6 +298,8 @@ namespace FarmHand.Persistence.Migrations
                     b.HasIndex("LivestockAnimalId");
 
                     b.HasIndex("LivestockCategoryId");
+
+                    b.HasIndex("SourceObservationId");
 
                     b.HasIndex("Status");
 
@@ -398,6 +407,10 @@ namespace FarmHand.Persistence.Migrations
                         .HasMaxLength(500)
                         .HasColumnType("character varying(500)");
 
+                    b.Property<string>("PhotoUrl")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
                     b.Property<DateTime?>("RecentGestationDate")
                         .HasColumnType("timestamp with time zone");
 
@@ -451,6 +464,10 @@ namespace FarmHand.Persistence.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
 
+                    b.Property<string>("Species")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -461,6 +478,45 @@ namespace FarmHand.Persistence.Migrations
                     b.HasIndex("Name");
 
                     b.ToTable("LivestockCategories");
+                });
+
+            modelBuilder.Entity("FarmHand.Domain.Entities.PasswordResetToken", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("TokenHash")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("UsedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TokenHash")
+                        .IsUnique();
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("PasswordResetTokens");
                 });
 
             modelBuilder.Entity("FarmHand.Domain.Entities.Payment", b =>
@@ -476,15 +532,33 @@ namespace FarmHand.Persistence.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("FailureReason")
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
                     b.Property<string>("IdempotencyKey")
                         .HasMaxLength(128)
                         .HasColumnType("character varying(128)");
 
+                    b.Property<Guid?>("InitiatedByUserId")
+                        .HasColumnType("uuid");
+
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean");
 
+                    b.Property<string>("Mode")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasDefaultValue("Simulated");
+
                     b.Property<DateTime?>("PaidAt")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ProviderTransactionId")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
 
                     b.Property<string>("Status")
                         .IsRequired()
@@ -510,6 +584,8 @@ namespace FarmHand.Persistence.Migrations
                         .HasColumnType("boolean");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("ProviderTransactionId");
 
                     b.HasIndex("TransactionReference")
                         .IsUnique();
@@ -544,7 +620,12 @@ namespace FarmHand.Persistence.Migrations
                         .HasColumnType("character varying(100)");
 
                     b.Property<string>("ExtractedByAi")
-                        .HasColumnType("text");
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("ExtractionDetails")
+                        .HasMaxLength(4000)
+                        .HasColumnType("character varying(4000)");
 
                     b.Property<Guid>("FarmId")
                         .HasColumnType("uuid");
@@ -564,6 +645,10 @@ namespace FarmHand.Persistence.Migrations
                     b.Property<string>("ImageUrl")
                         .HasMaxLength(500)
                         .HasColumnType("character varying(500)");
+
+                    b.Property<string>("InputChannels")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
 
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean");
@@ -596,6 +681,8 @@ namespace FarmHand.Persistence.Migrations
                         .HasColumnType("character varying(100)");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("ConfirmationStatus");
 
                     b.HasIndex("FarmId");
 
@@ -795,6 +882,14 @@ namespace FarmHand.Persistence.Migrations
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean");
 
+                    b.Property<DateTime?>("LastLoginAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("MustChangePassword")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
                     b.Property<string>("PasswordHash")
                         .IsRequired()
                         .HasMaxLength(500)
@@ -859,13 +954,17 @@ namespace FarmHand.Persistence.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
 
+                    b.Property<string>("PayoutAccountLast4")
+                        .HasMaxLength(4)
+                        .HasColumnType("character varying(4)");
+
                     b.Property<string>("PayoutAccountName")
                         .HasMaxLength(150)
                         .HasColumnType("character varying(150)");
 
                     b.Property<string>("PayoutAccountNumber")
-                        .HasMaxLength(50)
-                        .HasColumnType("character varying(50)");
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
 
                     b.Property<string>("PayoutBankCode")
                         .HasMaxLength(20)
@@ -903,8 +1002,29 @@ namespace FarmHand.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<DateTime?>("CancelledAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("CompletedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CompletionNotes")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("DeclineReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<DateTime?>("DeclinedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
 
                     b.Property<Guid>("IncidentId")
                         .HasColumnType("uuid");
@@ -912,8 +1032,14 @@ namespace FarmHand.Persistence.Migrations
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean");
 
+                    b.Property<DateTime?>("PreferredVisitDate")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<int>("RequestType")
                         .HasColumnType("integer");
+
+                    b.Property<Guid?>("RequestedByUserId")
+                        .HasColumnType("uuid");
 
                     b.Property<DateTime?>("RespondedAt")
                         .HasColumnType("timestamp with time zone");
@@ -932,6 +1058,8 @@ namespace FarmHand.Persistence.Migrations
                     b.HasIndex("IncidentId");
 
                     b.HasIndex("Status");
+
+                    b.HasIndex("VetPartnerId");
 
                     b.ToTable("VetRequests");
                 });
@@ -1028,6 +1156,15 @@ namespace FarmHand.Persistence.Migrations
                     b.HasOne("FarmHand.Domain.Entities.Farm", null)
                         .WithMany()
                         .HasForeignKey("FarmId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("FarmHand.Domain.Entities.PasswordResetToken", b =>
+                {
+                    b.HasOne("FarmHand.Domain.Entities.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });

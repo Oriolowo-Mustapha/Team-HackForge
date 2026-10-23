@@ -77,4 +77,18 @@ public class IncidentsController : ControllerBase
         await _mediator.Send(command, ct);
         return Ok();
     }
+
+    /// <summary>Search cases visible to the caller (farmer: own farms; vet: assigned cases; admin: all).</summary>
+    [HttpGet]
+    [ProducesResponseType(typeof(PagedResult<IncidentListItemDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> Search([FromQuery] SearchIncidentsQuery query, CancellationToken ct) =>
+        Ok(await _mediator.Send(query, ct));
+
+    /// <summary>Full case file: subject, source report, assessment, vet coordination, plans, follow-ups, actions and timeline.</summary>
+    [HttpGet("{incidentId:guid}/case")]
+    [ProducesResponseType(typeof(IncidentCaseDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetCase(Guid incidentId, CancellationToken ct) =>
+        Ok(await _mediator.Send(new GetIncidentCaseQuery(incidentId), ct));
 }

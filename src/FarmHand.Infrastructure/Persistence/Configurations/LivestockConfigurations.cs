@@ -11,6 +11,7 @@ public class LivestockCategoryConfiguration : IEntityTypeConfiguration<Livestock
         builder.HasKey(x => x.Id);
         builder.Property(x => x.Name).IsRequired().HasMaxLength(100);
         builder.Property(x => x.Description).HasMaxLength(500);
+        builder.Property(x => x.Species).HasMaxLength(50);
         builder.HasIndex(x => x.FarmId);
         builder.HasIndex(x => x.Name);
 
@@ -34,6 +35,7 @@ public class LivestockAnimalConfiguration : IEntityTypeConfiguration<LivestockAn
         builder.Property(x => x.DiseaseHistory).HasMaxLength(1000);
         builder.Property(x => x.Vaccinations).HasMaxLength(500);
         builder.Property(x => x.Parentage).HasMaxLength(500);
+        builder.Property(x => x.PhotoUrl).HasMaxLength(500);
         builder.HasIndex(x => x.FarmId);
         builder.HasIndex(x => x.CategoryId);
         builder.HasIndex(x => x.Species);

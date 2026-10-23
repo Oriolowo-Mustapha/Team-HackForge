@@ -6,6 +6,11 @@ using Microsoft.AspNetCore.Mvc;
 using System.ComponentModel.DataAnnotations;
 using System.Net;
 using System.Security.Cryptography;
+using FarmHand.Application.Features.Admin;
+using FarmHand.Application.Features.Incidents;
+using FarmHand.Application.Features.Payments;
+using FarmHand.Infrastructure.Persistence;
+using MediatR;
 
 namespace FarmHand.API.Controllers;
 
@@ -19,14 +24,20 @@ public class AdminController : ControllerBase
     private readonly IUnitOfWork _unitOfWork;
     private readonly IEmailService _emailService;
     private readonly ILogger<AdminController> _logger;
+    private readonly IAuditLogger _audit;
+    private readonly IMediator _mediator;
 
     public AdminController(
         IUserRepository userRepository,
         IVetPartnerRepository vetPartnerRepository,
         IUnitOfWork unitOfWork,
         IEmailService emailService,
-        ILogger<AdminController> logger)
+        ILogger<AdminController> logger,
+        IAuditLogger audit,
+        IMediator mediator)
     {
+        _audit = audit;
+        _mediator = mediator;
         _userRepository = userRepository;
         _vetPartnerRepository = vetPartnerRepository;
         _unitOfWork = unitOfWork;
@@ -61,20 +72,19 @@ public class AdminController : ControllerBase
         }
         else
         {
-            if (temporaryPassword.Length < 8)
-                return BadRequest(new { error = "Temporary password must be at least 8 characters." });
-
-            if (System.Text.Encoding.UTF8.GetByteCount(temporaryPassword) > 72)
-                return BadRequest(new { error = "Temporary password must be at most 72 bytes." });
+            if (AuthController.ValidatePassword(temporaryPassword) is { } passwordError)
+                return BadRequest(new { error = passwordError });
         }
 
         var fullName = request.FullName?.Trim();
         var vetUser = new User(
             email,
             BCrypt.Net.BCrypt.HashPassword(temporaryPassword),
-            "Vet",
+            UserRoles.Vet,
             fullName,
             request.PhoneNumber?.Trim());
+        // Administrator-issued passwords must be replaced at first sign-in.
+        vetUser.SetTemporaryPassword(vetUser.PasswordHash);
 
         var vetPartner = new VetPartner(
             vetUser.Id,
@@ -85,6 +95,7 @@ public class AdminController : ControllerBase
 
         await _unitOfWork.Users.AddAsync(vetUser, ct);
         await _unitOfWork.VetPartners.AddAsync(vetPartner, ct);
+        await _audit.RecordAsync("admin.vet_registered", vetPartner.Id, email, ct: ct);
 
         try
         {
@@ -125,24 +136,29 @@ public class AdminController : ControllerBase
     [HttpPost("vets/{vetId}/reset-credentials")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> ResetVetCredentials(Guid vetId, CancellationToken ct)
+    public async Task<IActionResult> ResetVetCredentials(Guid vetId, [FromBody] ResetCredentialsRequest? request, CancellationToken ct)
     {
         var vet = await _vetPartnerRepository.GetByIdAsync(vetId, ct);
         if (vet?.UserId is not { } userId)
             return NotFound(new { error = "Vet not found." });
 
-        if (!_emailService.IsEnabled)
-            return BadRequest(new { error = "Email delivery is disabled. Credentials cannot be delivered." });
+        var supplied = request?.TemporaryPassword;
+        if (string.IsNullOrWhiteSpace(supplied) && !_emailService.IsEnabled)
+            return BadRequest(new { error = "Email delivery is disabled. Provide a temporary password to share with the vet." });
+
+        if (!string.IsNullOrWhiteSpace(supplied) && AuthController.ValidatePassword(supplied) is { } passwordError)
+            return BadRequest(new { error = passwordError });
 
         var user = await _userRepository.GetByIdAsync(userId, ct);
         if (user is null)
             return NotFound(new { error = "Vet account not found." });
 
-        var temporaryPassword = GenerateTemporaryPassword();
-        user.ChangePassword(BCrypt.Net.BCrypt.HashPassword(temporaryPassword));
+        var temporaryPassword = string.IsNullOrWhiteSpace(supplied) ? GenerateTemporaryPassword() : supplied;
+        user.SetTemporaryPassword(BCrypt.Net.BCrypt.HashPassword(temporaryPassword));
         user.IncrementTokenVersion();
         _unitOfWork.Users.Update(user);
         await _unitOfWork.RefreshTokens.RevokeAllForUserAsync(userId, ct);
+        await _audit.RecordAsync("admin.vet_credentials_reset", vet.Id, ct: ct);
         await _unitOfWork.SaveChangesAsync(ct);
 
         var emailed = await _emailService.SendAsync(
@@ -213,6 +229,7 @@ public class AdminController : ControllerBase
             return NotFound(new { error = "Vet not found." });
 
         vet.Deactivate();
+        await _audit.RecordAsync("admin.vet_deactivated", vet.Id, ct: ct);
 
         if (vet.UserId is { } userId)
         {
@@ -228,6 +245,85 @@ public class AdminController : ControllerBase
         await _unitOfWork.SaveChangesAsync(ct);
 
         return Ok(new { message = "Vet deactivated." });
+    }
+
+    /// <summary>Reactivate a vet and their linked user account.</summary>
+    [HttpPost("vets/{vetId:guid}/activate")]
+    public async Task<IActionResult> ActivateVet(Guid vetId, CancellationToken ct)
+    {
+        var vet = await _vetPartnerRepository.GetByIdAsync(vetId, ct);
+        if (vet is null)
+            return NotFound(new { error = "Vet not found." });
+
+        vet.Activate();
+        if (vet.UserId is { } userId && await _userRepository.GetByIdAsync(userId, ct) is { } user)
+            user.Activate();
+        await _audit.RecordAsync("admin.vet_activated", vet.Id, ct: ct);
+        await _unitOfWork.SaveChangesAsync(ct);
+        return Ok(new { message = "Vet reactivated." });
+    }
+
+    /// <summary>Platform overview: counts by role and status, payment totals, recent audit events and integration status.</summary>
+    [HttpGet("overview")]
+    [ProducesResponseType(typeof(PlatformOverviewDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> Overview(CancellationToken ct) =>
+        Ok(await _mediator.Send(new GetPlatformOverviewQuery(), ct));
+
+    /// <summary>Search users by role, name or email.</summary>
+    [HttpGet("users")]
+    public async Task<IActionResult> Users([FromQuery] string? role, [FromQuery] string? q, [FromQuery] bool? active, [FromQuery] int page = 1, [FromQuery] int pageSize = 25, CancellationToken ct = default) =>
+        Ok(await _mediator.Send(new GetUsersQuery(role, q, active, page, pageSize), ct));
+
+    /// <summary>Deactivate a user (ends all sessions immediately).</summary>
+    [HttpPost("users/{userId:guid}/deactivate")]
+    public async Task<IActionResult> DeactivateUser(Guid userId, CancellationToken ct)
+    {
+        await _mediator.Send(new SetUserActiveCommand(userId, false), ct);
+        return Ok(new { message = "User deactivated." });
+    }
+
+    /// <summary>Reactivate a user.</summary>
+    [HttpPost("users/{userId:guid}/activate")]
+    public async Task<IActionResult> ActivateUser(Guid userId, CancellationToken ct)
+    {
+        await _mediator.Send(new SetUserActiveCommand(userId, true), ct);
+        return Ok(new { message = "User activated." });
+    }
+
+    /// <summary>All farms with their owners.</summary>
+    [HttpGet("farms")]
+    public async Task<IActionResult> Farms([FromQuery] string? q, [FromQuery] int page = 1, [FromQuery] int pageSize = 25, CancellationToken ct = default) =>
+        Ok(await _mediator.Send(new GetAdminFarmsQuery(q, page, pageSize), ct));
+
+    /// <summary>All cases across farms, filterable by status and severity.</summary>
+    [HttpGet("incidents")]
+    public async Task<IActionResult> Incidents([FromQuery] SearchIncidentsQuery query, CancellationToken ct) =>
+        Ok(await _mediator.Send(query, ct));
+
+    /// <summary>All payments, including payout amounts, for reconciliation.</summary>
+    [HttpGet("payments")]
+    public async Task<IActionResult> Payments([FromQuery] string? status, [FromQuery] int page = 1, [FromQuery] int pageSize = 25, CancellationToken ct = default) =>
+        Ok(await _mediator.Send(new GetPaymentsQuery(null, status, page, pageSize), ct));
+
+    /// <summary>System health: database connectivity, applied and pending migrations, and integration configuration.</summary>
+    [HttpGet("system")]
+    public async Task<IActionResult> SystemHealth([FromServices] FarmHandDbContext db, [FromServices] ISystemStatus status, CancellationToken ct)
+    {
+        var canConnect = await db.CanConnectAsync(ct);
+        IEnumerable<string> applied = [], pending = [];
+        if (canConnect)
+        {
+            applied = await Microsoft.EntityFrameworkCore.RelationalDatabaseFacadeExtensions.GetAppliedMigrationsAsync(db.Database, ct);
+            pending = await Microsoft.EntityFrameworkCore.RelationalDatabaseFacadeExtensions.GetPendingMigrationsAsync(db.Database, ct);
+        }
+
+        return Ok(new
+        {
+            database = new { connected = canConnect, appliedMigrations = applied.Count(), pendingMigrations = pending.ToList() },
+            integrations = status.GetIntegrationStatus(),
+            serverTimeUtc = DateTime.UtcNow,
+            version = typeof(AdminController).Assembly.GetName().Version?.ToString()
+        });
     }
 
     private static string GenerateTemporaryPassword()
@@ -307,3 +403,5 @@ public record RegisterVetRequest(
     [Required, MaxLength(100)] string Specialization,
     [Required, MaxLength(200)] string Contact,
     [MaxLength(20)] string? PhoneNumber = null);
+
+public record ResetCredentialsRequest([MaxLength(100)] string? TemporaryPassword);

@@ -24,6 +24,7 @@ public class UnitOfWork : IUnitOfWork
     public IIncidentActionRepository IncidentActions { get; }
     public IAuditEventRepository AuditEvents { get; }
     public IRefreshTokenRepository RefreshTokens { get; }
+    public IPasswordResetTokenRepository PasswordResetTokens { get; }
 
     public UnitOfWork(FarmHandDbContext dbContext)
     {
@@ -45,6 +46,7 @@ public class UnitOfWork : IUnitOfWork
         IncidentActions = new IncidentActionRepository(dbContext);
         AuditEvents = new AuditEventRepository(dbContext);
         RefreshTokens = new RefreshTokenRepository(dbContext);
+        PasswordResetTokens = new PasswordResetTokenRepository(dbContext);
     }
 
     public async Task<int> SaveChangesAsync(CancellationToken ct = default)

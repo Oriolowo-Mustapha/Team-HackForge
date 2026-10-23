@@ -20,16 +20,19 @@ public class YarnGptService
     {
         _httpClient = httpClient;
         _apiKey = configuration["YarnGpt:ApiKey"] ?? string.Empty;
-        _httpClient.BaseAddress = new Uri("https://api.yarngpt.ai/");
-        _httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {_apiKey}");
+        _httpClient.BaseAddress ??= new Uri("https://api.yarngpt.ai/");
+        if (IsConfigured)
+            _httpClient.DefaultRequestHeaders.TryAddWithoutValidation("Authorization", $"Bearer {_apiKey}");
         _logger = logger;
     }
 
-    public async Task<YarnGptSttResult> TranscribeAudioAsync(Stream audioStream, string fileName, string idempotencyKey, CancellationToken ct = default)
+    public bool IsConfigured => FarmHand.Infrastructure.AI.Clients.GeminiAiClient.IsRealKey(_apiKey);
+
+    public async Task<YarnGptSttResult> TranscribeAudioAsync(Stream audioStream, string fileName, string contentType, string idempotencyKey, CancellationToken ct = default)
     {
         using var content = new MultipartFormDataContent();
         using var streamContent = new StreamContent(audioStream);
-        streamContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("audio/webm");
+        streamContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(contentType);
         content.Add(streamContent, "file", fileName);
         content.Add(new StringContent(idempotencyKey), "Idempotency-Key");
 
@@ -39,10 +42,10 @@ public class YarnGptService
         if (!response.IsSuccessStatusCode)
         {
             _logger.LogWarning("YarnGPT STT upload failed: {StatusCode} {Body}", response.StatusCode, responseBody);
-            throw new InvalidOperationException($"YarnGPT STT failed: {response.StatusCode}");
+            throw new HttpRequestException($"YarnGPT STT failed: {response.StatusCode}");
         }
 
-        var uploadDoc = JsonDocument.Parse(responseBody);
+        using var uploadDoc = JsonDocument.Parse(responseBody);
         var jobId = uploadDoc.RootElement.GetProperty("job_id").GetString()!;
 
         // Poll for completion
@@ -61,7 +64,7 @@ public class YarnGptService
             var response = await _httpClient.GetAsync(pollUrl, ct);
             response.EnsureSuccessStatusCode();
             var body = await response.Content.ReadAsStringAsync(ct);
-            var doc = JsonDocument.Parse(body);
+            using var doc = JsonDocument.Parse(body);
             var status = doc.RootElement.GetProperty("status").GetString()!;
 
             if (status == "completed")
@@ -104,10 +107,10 @@ public class YarnGptService
         if (!response.IsSuccessStatusCode)
         {
             _logger.LogWarning("YarnGPT TTS failed: {StatusCode} {Body}", response.StatusCode, responseBody);
-            throw new InvalidOperationException($"YarnGPT TTS failed: {response.StatusCode}");
+            throw new HttpRequestException($"YarnGPT TTS failed: {response.StatusCode}");
         }
 
-        var doc = JsonDocument.Parse(responseBody);
+        using var doc = JsonDocument.Parse(responseBody);
         var jobId = doc.RootElement.GetProperty("job_id").GetString()!;
 
         // Poll for audio URL
@@ -125,7 +128,7 @@ public class YarnGptService
             var response = await _httpClient.GetAsync(pollUrl, ct);
             response.EnsureSuccessStatusCode();
             var body = await response.Content.ReadAsStringAsync(ct);
-            var doc = JsonDocument.Parse(body);
+            using var doc = JsonDocument.Parse(body);
             var status = doc.RootElement.GetProperty("status").GetString()!;
 
             if (status == "completed")
@@ -150,7 +153,7 @@ public class YarnGptService
         var response = await _httpClient.GetAsync("/api/v1/voices", ct);
         response.EnsureSuccessStatusCode();
         var body = await response.Content.ReadAsStringAsync(ct);
-        var doc = JsonDocument.Parse(body);
+        using var doc = JsonDocument.Parse(body);
 
         var voices = new List<string>();
         foreach (var el in doc.RootElement.EnumerateArray())

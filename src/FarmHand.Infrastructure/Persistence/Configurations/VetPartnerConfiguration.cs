@@ -14,7 +14,8 @@ public class VetPartnerConfiguration : IEntityTypeConfiguration<VetPartner>
         builder.Property(x => x.Specialization).HasMaxLength(100);
         builder.Property(x => x.Contact).HasMaxLength(200);
         builder.Property(x => x.PayoutBankCode).HasMaxLength(20);
-        builder.Property(x => x.PayoutAccountNumber).HasMaxLength(50);
+        builder.Property(x => x.PayoutAccountNumber).HasMaxLength(200);
+        builder.Property(x => x.PayoutAccountLast4).HasMaxLength(4);
         builder.Property(x => x.PayoutAccountName).HasMaxLength(150);
         builder.Property(x => x.PayoutCountry).HasMaxLength(10);
         builder.Property(x => x.PaymentSubaccountId).HasMaxLength(100);

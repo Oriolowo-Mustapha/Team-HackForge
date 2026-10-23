@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Http.Resilience" Version="9.0.0" />
     <ProjectReference Include="..\FarmHand.Domain\FarmHand.Domain.csproj" />
     <ProjectReference Include="..\FarmHand.Application\FarmHand.Application.csproj" />
     <PackageReference Include="BCrypt.Net-Next" Version="4.0.3" />

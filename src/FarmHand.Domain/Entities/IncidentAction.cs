@@ -18,8 +18,13 @@ public class IncidentAction : BaseEntity
         Priority = priority;
     }
 
+    public bool IsCompleted => Status == "Completed";
+
     public void Complete(string? notes = null)
     {
+        if (IsCompleted)
+            return;
+
         Status = "Completed";
         CompletedAt = DateTime.UtcNow;
         CompletionNotes = notes;

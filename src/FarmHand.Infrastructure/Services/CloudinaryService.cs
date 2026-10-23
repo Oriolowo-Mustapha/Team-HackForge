@@ -1,4 +1,4 @@
-using FarmHand.Application.Common.Interfaces;
+using FarmHand.Application.Common.Exceptions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using System.Net.Http.Headers;
@@ -8,23 +8,16 @@ using System.Text.Json;
 
 namespace FarmHand.Infrastructure.Services;
 
-public record CloudinaryUploadResult(string PublicId, string SecureUrl, string Url, int Width, int Height, string Format);
-
-public interface ICloudinaryService
-{
-    Task<CloudinaryUploadResult> UploadImageAsync(Stream imageStream, string fileName, string folder = "farmhand", CancellationToken ct = default);
-    Task<bool> DeleteImageAsync(string publicId, CancellationToken ct = default);
-}
-
-public class CloudinaryService : ICloudinaryService
+/// <summary>Signed Cloudinary uploads. Only <c>folder</c> and <c>timestamp</c> are sent and signed.</summary>
+public class CloudinaryImageStorage : IImageStorage
 {
     private readonly HttpClient _httpClient;
     private readonly string _cloudName;
     private readonly string _apiKey;
     private readonly string _apiSecret;
-    private readonly ILogger<CloudinaryService> _logger;
+    private readonly ILogger<CloudinaryImageStorage> _logger;
 
-    public CloudinaryService(HttpClient httpClient, IConfiguration configuration, ILogger<CloudinaryService> logger)
+    public CloudinaryImageStorage(HttpClient httpClient, IConfiguration configuration, ILogger<CloudinaryImageStorage> logger)
     {
         _httpClient = httpClient;
         _cloudName = configuration["Cloudinary:CloudName"] ?? string.Empty;
@@ -33,72 +26,94 @@ public class CloudinaryService : ICloudinaryService
         _logger = logger;
     }
 
-    public async Task<CloudinaryUploadResult> UploadImageAsync(Stream imageStream, string fileName, string folder = "farmhand", CancellationToken ct = default)
+    public string Provider => "cloudinary";
+
+    public static bool IsConfigured(IConfiguration configuration) =>
+        AI.Clients.GeminiAiClient.IsRealKey(configuration["Cloudinary:CloudName"])
+        && AI.Clients.GeminiAiClient.IsRealKey(configuration["Cloudinary:ApiKey"])
+        && AI.Clients.GeminiAiClient.IsRealKey(configuration["Cloudinary:ApiSecret"]);
+
+    public async Task<StoredImage> StoreAsync(byte[] content, string contentType, string folder, CancellationToken ct = default)
     {
-        var timestamp = ((int)(DateTime.UtcNow - new DateTime(1970, 1, 1)).TotalSeconds).ToString();
+        var timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString();
+        var signature = Sign($"folder={folder}&timestamp={timestamp}{_apiSecret}");
 
-        // Cloudinary signature: HMAC-SHA1 of alphabetically sorted parameters + api_secret.
-        // Every parameter sent in the request (except file, api_key, signature) must be signed.
-        var toSign = $"fetch_format=auto&folder={folder}&quality=auto&timestamp={timestamp}{_apiSecret}";
-        var signature = ComputeSignature(toSign);
+        using var form = new MultipartFormDataContent();
+        var file = new ByteArrayContent(content);
+        file.Headers.ContentType = new MediaTypeHeaderValue(contentType);
+        form.Add(file, "file", "upload");
+        form.Add(new StringContent(_apiKey), "api_key");
+        form.Add(new StringContent(folder), "folder");
+        form.Add(new StringContent(timestamp), "timestamp");
+        form.Add(new StringContent(signature), "signature");
 
-        var uploadUrl = $"https://api.cloudinary.com/v1_1/{_cloudName}/image/upload";
-
-        using var content = new MultipartFormDataContent();
-        using var streamContent = new StreamContent(imageStream);
-        streamContent.Headers.ContentType = new MediaTypeHeaderValue("image/*");
-        content.Add(streamContent, "file", fileName);
-        content.Add(new StringContent(_apiKey), "api_key");
-        content.Add(new StringContent(folder), "folder");
-        content.Add(new StringContent(timestamp), "timestamp");
-        content.Add(new StringContent(signature), "signature");
-        content.Add(new StringContent("auto"), "quality");
-        content.Add(new StringContent("auto"), "fetch_format");
-
-        var response = await _httpClient.PostAsync(uploadUrl, content, ct);
-        var responseBody = await response.Content.ReadAsStringAsync(ct);
-
-        if (!response.IsSuccessStatusCode)
+        try
         {
-            _logger.LogWarning("Cloudinary upload failed: {StatusCode} {Body}", response.StatusCode, responseBody);
-            throw new InvalidOperationException($"Cloudinary upload failed: {response.StatusCode}");
+            using var response = await _httpClient.PostAsync($"https://api.cloudinary.com/v1_1/{Uri.EscapeDataString(_cloudName)}/image/upload", form, ct);
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("Cloudinary upload failed with {StatusCode}", response.StatusCode);
+                throw new ExternalServiceException("cloudinary", "The photo could not be stored right now. Please try again.");
+            }
+
+            using var doc = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
+            var url = doc.RootElement.GetProperty("secure_url").GetString()!;
+            var publicId = doc.RootElement.GetProperty("public_id").GetString()!;
+            return new StoredImage(url, publicId, Provider);
         }
-
-        using var doc = JsonDocument.Parse(responseBody);
-        var root = doc.RootElement;
-
-        return new CloudinaryUploadResult(
-            root.GetProperty("public_id").GetString()!,
-            root.GetProperty("secure_url").GetString()!,
-            root.GetProperty("url").GetString()!,
-            root.TryGetProperty("width", out var w) ? w.GetInt32() : 0,
-            root.TryGetProperty("height", out var h) ? h.GetInt32() : 0,
-            root.TryGetProperty("format", out var f) ? f.GetString() ?? "jpg" : "jpg"
-        );
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException or KeyNotFoundException && !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex, "Cloudinary upload error");
+            throw new ExternalServiceException("cloudinary", "The photo could not be stored right now. Please try again.", ex);
+        }
     }
 
-    public async Task<bool> DeleteImageAsync(string publicId, CancellationToken ct = default)
+    private string Sign(string data)
     {
-        var timestamp = ((int)(DateTime.UtcNow - new DateTime(1970, 1, 1)).TotalSeconds).ToString();
-        var toSign = $"public_id={publicId}&timestamp={timestamp}{_apiSecret}";
-        var signature = ComputeSignature(toSign);
+        using var sha = SHA1.Create();
+        return Convert.ToHexString(sha.ComputeHash(Encoding.UTF8.GetBytes(data))).ToLowerInvariant();
+    }
+}
 
-        var deleteUrl = $"https://api.cloudinary.com/v1_1/{_cloudName}/image/destroy";
+/// <summary>
+/// Development/demo image storage on local disk. Files get random 128-bit names and are served only to
+/// authenticated users through <c>GET /api/media/{key}</c>. Container disks are ephemeral, so use
+/// Cloudinary for durable production storage.
+/// </summary>
+public class LocalImageStorage : IImageStorage
+{
+    private readonly string _root;
 
-        using var content = new MultipartFormDataContent();
-        content.Add(new StringContent(publicId), "public_id");
-        content.Add(new StringContent(_apiKey), "api_key");
-        content.Add(new StringContent(timestamp), "timestamp");
-        content.Add(new StringContent(signature), "signature");
-
-        var response = await _httpClient.PostAsync(deleteUrl, content, ct);
-        return response.IsSuccessStatusCode;
+    public LocalImageStorage(IConfiguration configuration)
+    {
+        _root = Path.GetFullPath(configuration["Storage:LocalPath"] ?? Path.Combine(AppContext.BaseDirectory, "App_Data", "uploads"));
+        Directory.CreateDirectory(_root);
     }
 
-    private string ComputeSignature(string dataToSign)
+    public string Provider => "local";
+
+    public string Root => _root;
+
+    public async Task<StoredImage> StoreAsync(byte[] content, string contentType, string folder, CancellationToken ct = default)
     {
-        using var hmac = new HMACSHA1(Encoding.UTF8.GetBytes(_apiSecret));
-        var hash = hmac.ComputeHash(Encoding.UTF8.GetBytes(dataToSign));
-        return BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant();
+        var extension = contentType switch
+        {
+            "image/png" => "png",
+            "image/webp" => "webp",
+            "image/heic" => "heic",
+            _ => "jpg"
+        };
+        var key = $"{Convert.ToHexString(RandomNumberGenerator.GetBytes(16)).ToLowerInvariant()}.{extension}";
+        await File.WriteAllBytesAsync(Path.Combine(_root, key), content, ct);
+        return new StoredImage($"/api/media/{key}", key, Provider);
+    }
+
+    /// <summary>Returns the absolute path for a key, or null if the key is malformed or missing.</summary>
+    public string? ResolvePath(string key)
+    {
+        if (!System.Text.RegularExpressions.Regex.IsMatch(key, "^[a-f0-9]{32}\\.(jpg|png|webp|heic)$"))
+            return null;
+        var path = Path.Combine(_root, key);
+        return File.Exists(path) ? path : null;
     }
 }

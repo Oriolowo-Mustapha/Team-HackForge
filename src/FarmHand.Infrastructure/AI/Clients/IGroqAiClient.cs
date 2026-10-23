@@ -2,6 +2,11 @@ namespace FarmHand.Infrastructure.AI.Clients;
 
 public interface IGroqAiClient
 {
-    Task<string> ExtractObservationRawAsync(string rawText, CancellationToken ct = default);
-    Task<string> AssessSeverityRawAsync(string prompt, CancellationToken ct = default);
+    bool IsConfigured { get; }
+    bool IsVisionConfigured { get; }
+    string Model { get; }
+    string? VisionModel { get; }
+
+    Task<string> CompleteAsync(string prompt, CancellationToken ct = default);
+    Task<string> CompleteWithImageAsync(string prompt, byte[] image, string mimeType, CancellationToken ct = default);
 }

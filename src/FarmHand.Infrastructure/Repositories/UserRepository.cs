@@ -23,4 +23,21 @@ public class UserRepository : EfRepository<User>, IUserRepository
     {
         return await DbSet.Where(u => u.Role == role).ToListAsync(ct);
     }
+
+    public async Task<PagedList<User>> SearchAsync(UserSearch search, CancellationToken ct = default)
+    {
+        var query = DbSet.AsNoTracking();
+        if (!string.IsNullOrWhiteSpace(search.Role)) query = query.Where(u => u.Role == search.Role);
+        if (search.IsActive is { } active) query = query.Where(u => u.IsActive == active);
+        if (!string.IsNullOrWhiteSpace(search.Text))
+        {
+            var pattern = $"%{search.Text.Trim()}%";
+            query = query.Where(u => EF.Functions.ILike(u.Email, pattern) || (u.FullName != null && EF.Functions.ILike(u.FullName, pattern)));
+        }
+
+        var total = await query.CountAsync(ct);
+        var items = await query.OrderByDescending(u => u.CreatedAt).Skip(search.Paging.Skip).Take(search.Paging.PageSize).ToListAsync(ct);
+        return new PagedList<User>(items, total);
+    }
+
 }

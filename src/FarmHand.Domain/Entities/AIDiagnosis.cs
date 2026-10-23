@@ -11,6 +11,9 @@ public class AIDiagnosis : BaseEntity
     public bool IncidentCreated { get; protected set; }
     public string? RawAssessment { get; protected set; }
 
+    /// <summary>Who produced the assessment, e.g. "gemini:gemini-3.5-flash" or "rules" for the rule-based fallback.</summary>
+    public string? Source { get; protected set; }
+
     protected AIDiagnosis() { }
 
     public AIDiagnosis(
@@ -19,7 +22,8 @@ public class AIDiagnosis : BaseEntity
         string diagnosisSummary,
         string recommendedAction,
         bool requiresVetConsultation,
-        string? rawAssessment = null)
+        string? rawAssessment = null,
+        string? source = null)
     {
         ObservationId = observationId;
         Severity = severity;
@@ -28,6 +32,7 @@ public class AIDiagnosis : BaseEntity
         RequiresVetConsultation = requiresVetConsultation;
         IncidentCreated = false;
         RawAssessment = rawAssessment;
+        Source = source;
     }
 
     public void LinkIncident(Guid incidentId)

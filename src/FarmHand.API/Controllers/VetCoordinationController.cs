@@ -95,11 +95,12 @@ public class VetCoordinationController : ControllerBase
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> RespondVetRequest(Guid vetRequestId, [FromBody] RespondVetRequestCommand command, CancellationToken ct)
+    public async Task<IActionResult> RespondVetRequest(Guid vetRequestId, [FromBody] RespondVetRequestCommand? command, CancellationToken ct)
     {
+        command ??= new RespondVetRequestCommand(vetRequestId);
         if (vetRequestId != command.VetRequestId) return BadRequest();
         await _mediator.Send(command, ct);
-        return Ok();
+        return Ok(await _mediator.Send(new GetVetRequestQuery(vetRequestId), ct));
     }
 
     /// <summary>Record a cost-share contribution for a vet request.</summary>
@@ -176,4 +177,53 @@ public class VetCoordinationController : ControllerBase
         if (plan is null) return NotFound();
         return Ok(plan);
     }
+
+    /// <summary>
+    /// List vet requests. Farmers see their farms' requests. Vets pass <c>scope=open</c> for pending requests
+    /// they may accept, or <c>scope=assigned</c> (default) for their accepted and finished work.
+    /// </summary>
+    [HttpGet("vet-requests")]
+    [ProducesResponseType(typeof(PagedResult<VetRequestDetailDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> ListVetRequests(
+        [FromQuery] string? scope,
+        [FromQuery] RequestStatus? status,
+        [FromQuery] Guid? incidentId,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20,
+        CancellationToken ct = default) =>
+        Ok(await _mediator.Send(new GetVetRequestsQuery(scope, status, incidentId, page, pageSize), ct));
+
+    /// <summary>One vet request. Farmer contact details are only included for the owner, admins and the assigned vet.</summary>
+    [HttpGet("vet-requests/{vetRequestId:guid}")]
+    [ProducesResponseType(typeof(VetRequestDetailDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetVetRequest(Guid vetRequestId, CancellationToken ct) =>
+        Ok(await _mediator.Send(new GetVetRequestQuery(vetRequestId), ct));
+
+    /// <summary>The vet a request was sent to declines it.</summary>
+    [HttpPost("vet-requests/{vetRequestId:guid}/decline")]
+    public async Task<IActionResult> Decline(Guid vetRequestId, [FromBody] ReasonRequest? request, CancellationToken ct)
+    {
+        await _mediator.Send(new DeclineVetRequestCommand(vetRequestId, request?.Reason), ct);
+        return Ok(await _mediator.Send(new GetVetRequestQuery(vetRequestId), ct));
+    }
+
+    /// <summary>The farmer withdraws a request that has not been paid for.</summary>
+    [HttpPost("vet-requests/{vetRequestId:guid}/cancel")]
+    public async Task<IActionResult> Cancel(Guid vetRequestId, CancellationToken ct)
+    {
+        await _mediator.Send(new CancelVetRequestCommand(vetRequestId), ct);
+        return Ok(await _mediator.Send(new GetVetRequestQuery(vetRequestId), ct));
+    }
+
+    /// <summary>The assigned vet marks the service delivered. Paid services require a verified payment.</summary>
+    [HttpPost("vet-requests/{vetRequestId:guid}/complete")]
+    public async Task<IActionResult> Complete(Guid vetRequestId, [FromBody] NotesRequest? request, CancellationToken ct)
+    {
+        await _mediator.Send(new CompleteVetRequestCommand(vetRequestId, request?.Notes), ct);
+        return Ok(await _mediator.Send(new GetVetRequestQuery(vetRequestId), ct));
+    }
 }
+
+public record ReasonRequest(string? Reason);
+
+public record NotesRequest(string? Notes);

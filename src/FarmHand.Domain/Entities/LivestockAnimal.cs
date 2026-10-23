@@ -17,6 +17,7 @@ public class LivestockAnimal : BaseEntity
     public DateTime? LastLactationDate { get; protected set; } // Last lactation date (for dairy animals)
     public string? Parentage { get; protected set; } // Sire/dam or breeding line info
     public bool IsActive { get; protected set; } = true;
+    public string? PhotoUrl { get; protected set; }
 
     protected LivestockAnimal() { }
 
@@ -77,6 +78,18 @@ public class LivestockAnimal : BaseEntity
         Vaccinations = vaccinations;
         LastLactationDate = lastLactationDate;
         Parentage = parentage;
+        MarkUpdated();
+    }
+
+    public void SetPhoto(string? photoUrl)
+    {
+        PhotoUrl = photoUrl;
+        MarkUpdated();
+    }
+
+    public void MoveToCategory(Guid categoryId)
+    {
+        CategoryId = categoryId;
         MarkUpdated();
     }
 

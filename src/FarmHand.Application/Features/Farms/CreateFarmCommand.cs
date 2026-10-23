@@ -31,7 +31,10 @@ public class CreateFarmCommandHandler : IRequestHandler<CreateFarmCommand, Guid>
         var ownerId = _currentUser.UserId?.ToString()
             ?? throw new UnauthorizedAccessException("An authenticated user is required to create a farm.");
 
-        var farm = new Farm(ownerId, request.DisplayName, request.Location);
+        if (_currentUser.IsVet)
+            throw new UnauthorizedAccessException("Veterinarian accounts cannot own farms.");
+
+        var farm = new Farm(ownerId, request.DisplayName.Trim(), request.Location.Trim());
         await _farmRepository.AddAsync(farm, ct);
         await _unitOfWork.SaveChangesAsync(ct);
         return farm.Id;

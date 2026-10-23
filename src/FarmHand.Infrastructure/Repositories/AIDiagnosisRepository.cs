@@ -13,4 +13,11 @@ public class AIDiagnosisRepository : EfRepository<AIDiagnosis>, IAIDiagnosisRepo
     {
         return await DbSet.FirstOrDefaultAsync(d => d.ObservationId == observationId, ct);
     }
+
+    public async Task<IReadOnlyList<AIDiagnosis>> GetByObservationIdsAsync(IEnumerable<Guid> observationIds, CancellationToken ct = default)
+    {
+        var ids = observationIds.Distinct().ToList();
+        if (ids.Count == 0) return [];
+        return await DbSet.Where(d => ids.Contains(d.ObservationId)).ToListAsync(ct);
+    }
 }

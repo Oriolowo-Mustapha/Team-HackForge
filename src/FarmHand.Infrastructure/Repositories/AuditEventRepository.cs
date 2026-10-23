@@ -18,4 +18,16 @@ public class AuditEventRepository : EfRepository<AuditEvent>, IAuditEventReposit
     {
         return await DbSet.Where(a => a.EventType == eventType).OrderByDescending(a => a.Timestamp).ToListAsync(ct);
     }
+
+    public async Task<PagedList<AuditEvent>> SearchAsync(AuditEventSearch search, CancellationToken ct = default)
+    {
+        var query = DbSet.AsNoTracking();
+        if (!string.IsNullOrWhiteSpace(search.ActorId)) query = query.Where(a => a.ActorId == search.ActorId);
+        if (!string.IsNullOrWhiteSpace(search.EventType)) query = query.Where(a => a.EventType == search.EventType);
+        if (search.RelatedRecordId is { } related) query = query.Where(a => a.RelatedRecordId == related);
+
+        var total = await query.CountAsync(ct);
+        var items = await query.OrderByDescending(a => a.Timestamp).Skip(search.Paging.Skip).Take(search.Paging.PageSize).ToListAsync(ct);
+        return new PagedList<AuditEvent>(items, total);
+    }
 }

@@ -10,7 +10,9 @@ namespace FarmHand.Application.Features.LivestockCategories;
 /// <param name="FarmId">Owning farm id; must belong to the caller.</param>
 /// <param name="Name">Category name, for example "Goats" or "Poultry".</param>
 /// <param name="Description">Optional description.</param>
-public record CreateLivestockCategoryCommand(Guid FarmId, string Name, string? Description) : IRequest<Guid>;
+/// <param name="Species">Optional species for flock-level groups, e.g. "Chicken".</param>
+/// <param name="Headcount">Optional head count maintained by the farmer for flocks.</param>
+public record CreateLivestockCategoryCommand(Guid FarmId, string Name, string? Description, string? Species = null, int? Headcount = null) : IRequest<Guid>;
 
 public class CreateLivestockCategoryCommandHandler : IRequestHandler<CreateLivestockCategoryCommand, Guid>
 {
@@ -32,7 +34,7 @@ public class CreateLivestockCategoryCommandHandler : IRequestHandler<CreateLives
     {
         await _authorization.EnsureFarmAccessAsync(request.FarmId, ct);
 
-        var category = new LivestockCategory(request.FarmId, request.Name, request.Description);
+        var category = new LivestockCategory(request.FarmId, request.Name.Trim(), request.Description?.Trim(), request.Species?.Trim(), request.Headcount ?? 0);
         await _categoryRepository.AddAsync(category, ct);
         await _unitOfWork.SaveChangesAsync(ct);
         return category.Id;
@@ -46,6 +48,8 @@ public class CreateLivestockCategoryCommandValidator : AbstractValidator<CreateL
         RuleFor(x => x.FarmId).NotEqual(Guid.Empty);
         RuleFor(x => x.Name).NotEmpty().MaximumLength(100);
         RuleFor(x => x.Description).MaximumLength(500);
+        RuleFor(x => x.Species).MaximumLength(50);
+        RuleFor(x => x.Headcount).InclusiveBetween(0, 1_000_000).When(x => x.Headcount is not null);
     }
 }
 

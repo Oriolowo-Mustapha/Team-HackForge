@@ -7,3 +7,4 @@ global using FarmHand.Application.Common.Interfaces;
 global using MediatR;
 global using FluentValidation;
 global using Microsoft.Extensions.Logging;
+global using Severity = FarmHand.Domain.Enums.Severity;

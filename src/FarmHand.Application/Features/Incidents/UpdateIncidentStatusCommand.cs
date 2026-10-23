@@ -15,12 +15,15 @@ public class UpdateIncidentStatusCommandHandler : IRequestHandler<UpdateIncident
     private readonly IIncidentRepository _incidentRepository;
     private readonly IUnitOfWork _unitOfWork;
     private readonly Application.Common.Interfaces.IResourceAuthorizationService _authorization;
+    private readonly Application.Common.Interfaces.IAuditLogger _audit;
 
     public UpdateIncidentStatusCommandHandler(
         IIncidentRepository incidentRepository,
         IUnitOfWork unitOfWork,
-        Application.Common.Interfaces.IResourceAuthorizationService authorization)
+        Application.Common.Interfaces.IResourceAuthorizationService authorization,
+        Application.Common.Interfaces.IAuditLogger audit)
     {
+        _audit = audit;
         _incidentRepository = incidentRepository;
         _unitOfWork = unitOfWork;
         _authorization = authorization;
@@ -34,7 +37,12 @@ public class UpdateIncidentStatusCommandHandler : IRequestHandler<UpdateIncident
         var incident = await _incidentRepository.GetByIdAsync(request.IncidentId, ct)
             ?? throw new KeyNotFoundException($"Incident {request.IncidentId} not found.");
 
-        await _authorization.EnsureFarmAccessAsync(incident.FarmId, ct);
+        await _authorization.EnsureIncidentWriteAccessAsync(incident.Id, ct);
+
+        if (!incident.AllowedTransitions.Contains(request.NewStatus))
+            throw Common.Exceptions.PublicException.Conflict($"A case that is {incident.Status} cannot be moved to {request.NewStatus}.");
+
+        var previous = incident.Status;
 
         switch (request.NewStatus)
         {
@@ -55,6 +63,7 @@ public class UpdateIncidentStatusCommandHandler : IRequestHandler<UpdateIncident
                 break;
         }
 
+        await _audit.RecordAsync("incident.status_changed", incident.Id, $"{previous} -> {incident.Status}", ct: ct);
         await _unitOfWork.SaveChangesAsync(ct);
         return Unit.Value;
     }

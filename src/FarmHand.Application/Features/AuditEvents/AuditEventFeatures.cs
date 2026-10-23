@@ -55,43 +55,41 @@ public class CreateAuditEventCommandValidator : AbstractValidator<CreateAuditEve
     }
 }
 
-/// <summary>List audit events, optionally filtered by actor or event type.</summary>
+/// <summary>List audit events (administrators only), optionally filtered by actor, type or related record.</summary>
 /// <param name="ActorId">Optional actor id filter.</param>
 /// <param name="EventType">Optional event type filter.</param>
-public record GetAuditEventsQuery(string? ActorId, string? EventType) : IRequest<List<AuditEventDto>>;
+/// <param name="RelatedRecordId">Optional related record filter.</param>
+public record GetAuditEventsQuery(string? ActorId, string? EventType, Guid? RelatedRecordId = null, int Page = 1, int PageSize = 50)
+    : IRequest<PagedResult<AuditEventDto>>;
 
-public class GetAuditEventsQueryHandler : IRequestHandler<GetAuditEventsQuery, List<AuditEventDto>>
+public class GetAuditEventsQueryHandler : IRequestHandler<GetAuditEventsQuery, PagedResult<AuditEventDto>>
 {
     private readonly IAuditEventRepository _auditRepository;
+    private readonly ICurrentUserService _currentUser;
 
-    public GetAuditEventsQueryHandler(IAuditEventRepository auditRepository)
+    public GetAuditEventsQueryHandler(IAuditEventRepository auditRepository, ICurrentUserService currentUser)
     {
         _auditRepository = auditRepository;
+        _currentUser = currentUser;
     }
 
-    public async Task<List<AuditEventDto>> Handle(GetAuditEventsQuery request, CancellationToken ct)
+    public async Task<PagedResult<AuditEventDto>> Handle(GetAuditEventsQuery request, CancellationToken ct)
     {
-        IEnumerable<AuditEvent> events;
+        if (!_currentUser.IsAdmin)
+            throw new UnauthorizedAccessException("Only administrators can read audit events.");
 
-        if (!string.IsNullOrWhiteSpace(request.EventType))
-        {
-            events = await _auditRepository.GetByEventTypeAsync(request.EventType, default);
-        }
-        else if (!string.IsNullOrWhiteSpace(request.ActorId))
-        {
-            events = await _auditRepository.GetByActorIdAsync(request.ActorId, default);
-        }
-        else
-        {
-            events = await _auditRepository.GetAllAsync(default);
-        }
-
-        return events.Select(e => new AuditEventDto(
-            e.Id, e.ActorId, e.EventType, e.RelatedRecordId, e.Timestamp, e.Details)).ToList();
+        var paging = new Paging(request.Page, request.PageSize);
+        var page = await _auditRepository.SearchAsync(new AuditEventSearch(request.ActorId, request.EventType, request.RelatedRecordId, paging), ct);
+        var items = page.Items.Select(e => new AuditEventDto(e.Id, e.ActorId, e.EventType, e.RelatedRecordId, e.Timestamp, e.Details)).ToList();
+        return new PagedResult<AuditEventDto>(items, paging.Page, paging.PageSize, page.TotalCount,
+            (int)Math.Ceiling(page.TotalCount / (double)paging.PageSize));
     }
 }
 
 public class GetAuditEventsQueryValidator : AbstractValidator<GetAuditEventsQuery>
 {
-    public GetAuditEventsQueryValidator() { }
+    public GetAuditEventsQueryValidator()
+    {
+        RuleFor(x => x.PageSize).InclusiveBetween(1, 100);
+    }
 }

@@ -1,4 +1,3 @@
-using FarmHand.Application.Common.DTOs;
 using FarmHand.Application.Common.Interfaces;
 using FarmHand.Domain.Entities;
 using FarmHand.Domain.Interfaces;
@@ -6,26 +5,29 @@ using MediatR;
 
 namespace FarmHand.Application.Features.VetCoordination;
 
-/// <summary>Create a prevention plan for an incident.</summary>
-/// <param name="IncidentId">Incident id; must be accessible to the caller.</param>
+/// <summary>Creates or replaces the prevention plan for an incident (farm owner, admin or assigned vet).</summary>
+/// <param name="IncidentId">Incident id; must match the route value.</param>
 /// <param name="Content">Plan content.</param>
-/// <param name="GeneratedFromHistory">Whether the plan was generated from historical data.</param>
-public record CreatePreventionPlanCommand(Guid IncidentId, string Content, bool GeneratedFromHistory = true) : IRequest<Guid>;
+/// <param name="GeneratedFromHistory">Whether the plan was drafted from farm history.</param>
+public record CreatePreventionPlanCommand(Guid IncidentId, string Content, bool GeneratedFromHistory = false) : IRequest<Guid>;
 
 public class CreatePreventionPlanCommandHandler : IRequestHandler<CreatePreventionPlanCommand, Guid>
 {
     private readonly IPreventionPlanRepository _preventionPlanRepository;
     private readonly IUnitOfWork _unitOfWork;
     private readonly IResourceAuthorizationService _authorization;
+    private readonly IAuditLogger _audit;
 
     public CreatePreventionPlanCommandHandler(
         IPreventionPlanRepository preventionPlanRepository,
         IUnitOfWork unitOfWork,
-        IResourceAuthorizationService authorization)
+        IResourceAuthorizationService authorization,
+        IAuditLogger audit)
     {
         _preventionPlanRepository = preventionPlanRepository;
         _unitOfWork = unitOfWork;
         _authorization = authorization;
+        _audit = audit;
     }
 
     public async Task<Guid> Handle(CreatePreventionPlanCommand request, CancellationToken ct)
@@ -33,10 +35,21 @@ public class CreatePreventionPlanCommandHandler : IRequestHandler<CreatePreventi
         var incident = await _unitOfWork.Incidents.GetByIdAsync(request.IncidentId, ct)
             ?? throw new KeyNotFoundException($"Incident {request.IncidentId} not found.");
 
-        await _authorization.EnsureFarmAccessAsync(incident.FarmId, ct);
+        await _authorization.EnsureIncidentWriteAccessAsync(incident.Id, ct);
 
-        var plan = new PreventionPlan(request.IncidentId, request.Content, request.GeneratedFromHistory);
+        var content = request.Content.Trim();
+        var existing = await _preventionPlanRepository.GetByIncidentIdAsync(request.IncidentId, ct);
+        if (existing is not null)
+        {
+            existing.UpdateContent(content, request.GeneratedFromHistory);
+            await _audit.RecordAsync("prevention_plan.updated", incident.Id, ct: ct);
+            await _unitOfWork.SaveChangesAsync(ct);
+            return existing.Id;
+        }
+
+        var plan = new PreventionPlan(request.IncidentId, content, request.GeneratedFromHistory);
         await _preventionPlanRepository.AddAsync(plan, ct);
+        await _audit.RecordAsync("prevention_plan.created", incident.Id, ct: ct);
         await _unitOfWork.SaveChangesAsync(ct);
         return plan.Id;
     }
