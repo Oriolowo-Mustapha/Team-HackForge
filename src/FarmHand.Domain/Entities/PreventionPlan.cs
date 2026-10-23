@@ -14,4 +14,11 @@ public class PreventionPlan : BaseEntity
         Content = content;
         GeneratedFromHistory = generatedFromHistory;
     }
+
+    public void UpdateContent(string content, bool generatedFromHistory)
+    {
+        Content = content;
+        GeneratedFromHistory = generatedFromHistory;
+        MarkUpdated();
+    }
 }

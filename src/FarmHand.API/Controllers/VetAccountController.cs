@@ -20,14 +20,17 @@ public class VetAccountController : ControllerBase
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserService _currentUser;
     private readonly ILogger<VetAccountController> _logger;
+    private readonly IFieldEncryptor _encryptor;
 
     public VetAccountController(
         IVetPartnerRepository vetPartnerRepository,
         IPaymentService paymentService,
         IUnitOfWork unitOfWork,
         ICurrentUserService currentUser,
-        ILogger<VetAccountController> logger)
+        ILogger<VetAccountController> logger,
+        IFieldEncryptor encryptor)
     {
+        _encryptor = encryptor;
         _vetPartnerRepository = vetPartnerRepository;
         _paymentService = paymentService;
         _unitOfWork = unitOfWork;
@@ -97,7 +100,8 @@ public class VetAccountController : ControllerBase
                 : PublicException.BadRequest(subaccount.ErrorMessage ?? "The payout account could not be verified.");
         }
 
-        vet.UpdatePayoutAccount(bankCode, accountNumber, accountName, country, subaccount.SubaccountId);
+        // The account number is encrypted at rest; only the last four digits are kept in clear for display.
+        vet.UpdatePayoutAccount(bankCode, _encryptor.Encrypt(accountNumber), accountNumber[^4..], accountName, country, subaccount.SubaccountId);
         _vetPartnerRepository.Update(vet);
         await _unitOfWork.SaveChangesAsync(ct);
 
@@ -129,25 +133,15 @@ public class VetAccountController : ControllerBase
         configured = vet.HasPayoutAccount,
         bankCode = vet.PayoutBankCode,
         accountName = vet.PayoutAccountName,
-        accountNumberMasked = MaskAccountNumber(vet.PayoutAccountNumber),
+        accountNumberMasked = string.IsNullOrWhiteSpace(vet.PayoutAccountLast4) ? null : $"******{vet.PayoutAccountLast4}",
         country = vet.PayoutCountry,
         subaccountConfigured = !string.IsNullOrWhiteSpace(vet.PaymentSubaccountId)
     };
 
-    private static string? MaskAccountNumber(string? accountNumber)
-    {
-        if (string.IsNullOrWhiteSpace(accountNumber))
-            return null;
-
-        var value = accountNumber.Trim();
-        return value.Length <= 4
-            ? new string('*', value.Length)
-            : $"{new string('*', value.Length - 4)}{value[^4..]}";
-    }
 }
 
 public record UpdatePayoutAccountRequest(
     [Required, MinLength(2), MaxLength(20)] string BankCode,
-    [Required, MinLength(6), MaxLength(34)] string AccountNumber,
+    [Required, RegularExpression("^[0-9]{6,20}$", ErrorMessage = "Account number must be 6-20 digits."), MaxLength(20)] string AccountNumber,
     [Required, MinLength(3), MaxLength(150)] string AccountName,
     [MaxLength(10)] string? Country = "NG");

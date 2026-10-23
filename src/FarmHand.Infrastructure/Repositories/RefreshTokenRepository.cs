@@ -27,4 +27,15 @@ public class RefreshTokenRepository : EfRepository<RefreshToken>, IRefreshTokenR
         foreach (var token in tokens)
             token.Revoke();
     }
+
+    public async Task<bool> TryRevokeAsync(Guid tokenId, CancellationToken ct = default)
+    {
+        var now = DateTime.UtcNow;
+        var updated = await DbSet
+            .Where(t => t.Id == tokenId && t.RevokedAt == null)
+            .ExecuteUpdateAsync(set => set
+                .SetProperty(t => t.RevokedAt, now)
+                .SetProperty(t => t.UpdatedAt, now), ct);
+        return updated == 1;
+    }
 }

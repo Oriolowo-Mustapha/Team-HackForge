@@ -26,6 +26,7 @@ public class FarmHandDbContext : DbContext
     public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
     public DbSet<User> Users => Set<User>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
+    public DbSet<PasswordResetToken> PasswordResetTokens => Set<PasswordResetToken>();
 
     public FarmHandDbContext(DbContextOptions<FarmHandDbContext> options) : base(options) { }
 
@@ -51,10 +52,26 @@ public class FarmHandDbContext : DbContext
         modelBuilder.ApplyConfiguration(new AuditEventConfiguration());
         modelBuilder.ApplyConfiguration(new UserConfiguration());
         modelBuilder.ApplyConfiguration(new RefreshTokenConfiguration());
+        modelBuilder.ApplyConfiguration(new PasswordResetTokenConfiguration());
+
+        // Soft delete is applied consistently: rows flagged IsDeleted are hidden from every query.
+        foreach (var entityType in modelBuilder.Model.GetEntityTypes())
+        {
+            if (entityType.IsOwned() || !typeof(BaseEntity).IsAssignableFrom(entityType.ClrType))
+                continue;
+
+            var parameter = System.Linq.Expressions.Expression.Parameter(entityType.ClrType, "e");
+            var body = System.Linq.Expressions.Expression.Not(
+                System.Linq.Expressions.Expression.Property(parameter, nameof(BaseEntity.IsDeleted)));
+            entityType.SetQueryFilter(System.Linq.Expressions.Expression.Lambda(body, parameter));
+        }
     }
 
     public override async Task<int> SaveChangesAsync(CancellationToken ct = default)
     {
         return await base.SaveChangesAsync(ct);
     }
+
+    /// <summary>Raw access to this context's database facade for health checks.</summary>
+    public Task<bool> CanConnectAsync(CancellationToken ct = default) => Database.CanConnectAsync(ct);
 }

@@ -4,4 +4,5 @@ public interface IAuditEventRepository : IRepository<AuditEvent>
 {
     Task<IEnumerable<AuditEvent>> GetByActorIdAsync(string actorId, CancellationToken ct = default);
     Task<IEnumerable<AuditEvent>> GetByEventTypeAsync(string eventType, CancellationToken ct = default);
+    Task<PagedList<AuditEvent>> SearchAsync(AuditEventSearch search, CancellationToken ct = default);
 }

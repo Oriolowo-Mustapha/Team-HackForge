@@ -15,8 +15,12 @@ public class PoultryObservationConfiguration : IEntityTypeConfiguration<PoultryO
         builder.Property(x => x.FarmerNotes).HasMaxLength(1000);
         builder.Property(x => x.RawTranscript).HasMaxLength(2000);
         builder.Property(x => x.ImageUrl).HasMaxLength(500);
+        builder.HasIndex(x => x.ConfirmationStatus);
         builder.Property(x => x.VisionAnalysis).HasMaxLength(2000);
         builder.Property(x => x.IdempotencyKey).HasMaxLength(128);
+        builder.Property(x => x.ExtractedByAi).HasMaxLength(100);
+        builder.Property(x => x.ExtractionDetails).HasMaxLength(4000);
+        builder.Property(x => x.InputChannels).HasMaxLength(50);
         builder.HasIndex(x => x.FarmId);
         builder.HasIndex(x => x.LivestockAnimalId);
         builder.HasIndex(x => x.LivestockCategoryId);

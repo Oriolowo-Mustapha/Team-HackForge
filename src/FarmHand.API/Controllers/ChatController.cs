@@ -3,7 +3,8 @@ using FarmHand.Application.Features.Incidents;
 using FarmHand.Application.Features.Poultry;
 using FarmHand.Domain.Enums;
 using FarmHand.Domain.Interfaces;
-using FarmHand.Infrastructure.Services;
+using FarmHand.Application.Features.Observations;
+using Microsoft.AspNetCore.RateLimiting;
 using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
@@ -17,32 +18,17 @@ namespace FarmHand.API.Controllers;
 public class ChatController : ControllerBase
 {
     private readonly IMediator _mediator;
-    private readonly IFarmAiService _aiService;
-    private readonly IVisionAnalysisService _visionService;
-    private readonly ICloudinaryService _cloudinary;
-    private readonly YarnGptService _yarnGpt;
     private readonly IPoultryObservationRepository _observationRepository;
     private readonly IResourceAuthorizationService _authorization;
-    private readonly ILogger<ChatController> _logger;
 
     public ChatController(
         IMediator mediator,
-        IFarmAiService aiService,
-        IVisionAnalysisService visionService,
-        ICloudinaryService cloudinary,
-        YarnGptService yarnGpt,
         IPoultryObservationRepository observationRepository,
-        IResourceAuthorizationService authorization,
-        ILogger<ChatController> logger)
+        IResourceAuthorizationService authorization)
     {
         _mediator = mediator;
-        _aiService = aiService;
-        _visionService = visionService;
-        _cloudinary = cloudinary;
-        _yarnGpt = yarnGpt;
         _observationRepository = observationRepository;
         _authorization = authorization;
-        _logger = logger;
     }
 
     /// <summary>
@@ -64,98 +50,41 @@ public class ChatController : ControllerBase
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [EnableRateLimiting("ai")]
+    [RequestSizeLimit(20 * 1024 * 1024)]
     public async Task<IActionResult> ChatObservation(
         [FromForm] ChatObservationRequest request,
         CancellationToken ct = default)
     {
-        if (request.FarmId == Guid.Empty)
-            return BadRequest(new { error = "Farm id is required." });
-
-        if (request.LivestockAnimalId is null && request.LivestockCategoryId is null)
-            return BadRequest(new { error = "Provide either a livestock animal or a category." });
-
-        await _authorization.EnsureFarmAccessAsync(request.FarmId, ct);
-
         var key = string.IsNullOrWhiteSpace(request.IdempotencyKey)
             ? Guid.NewGuid().ToString("N")
             : request.IdempotencyKey.Trim();
 
-        var existingObservation = await _observationRepository.GetByIdempotencyKeyAsync(key, ct);
-        if (existingObservation is not null)
-        {
-            await _authorization.EnsureFarmAccessAsync(existingObservation.FarmId, ct);
-            return Accepted(new
-            {
-                observationId = existingObservation.Id,
-                status = existingObservation.ConfirmationStatus.ToString(),
-                reused = true,
-                request.FarmId,
-                request.LivestockAnimalId,
-                request.LivestockCategoryId,
-                transcript = existingObservation.RawTranscript,
-                imageUrl = existingObservation.ImageUrl,
-                visionAnalysis = existingObservation.VisionAnalysis is null
-                    ? null
-                    : System.Text.Json.JsonSerializer.Deserialize<object>(existingObservation.VisionAnalysis),
-                message = "Existing observation returned for this idempotency key."
-            });
-        }
-
-        string? transcript = request.RawText;
-
-        if (request.AudioFile is { Length: > 0 })
-        {
-            using var audioStream = request.AudioFile.OpenReadStream();
-            var sttResult = await _yarnGpt.TranscribeAudioAsync(audioStream, request.AudioFile.FileName, key, ct);
-            transcript = sttResult.Transcript;
-            _logger.LogInformation("Chat STT completed");
-        }
-
-        if (string.IsNullOrWhiteSpace(transcript))
-            return BadRequest(new { error = "No text or audio provided." });
-
-        string? imageUrl = null;
-        string? visionAnalysisJson = null;
-
-        if (request.ImageFile is { Length: > 0 })
-        {
-            using var imageStream = request.ImageFile.OpenReadStream();
-            var uploadResult = await _cloudinary.UploadImageAsync(imageStream, request.ImageFile.FileName, "farmhand/observations", ct);
-            imageUrl = uploadResult.SecureUrl;
-
-            var vision = await _visionService.AnalyzeImageAsync(imageUrl, transcript, ct);
-            visionAnalysisJson = System.Text.Json.JsonSerializer.Serialize(new
-            {
-                vision.Description,
-                vision.DetectedIssues,
-                vision.Confidence,
-                AnalyzedAt = DateTime.UtcNow
-            });
-        }
-
-        var command = new RecordObservationCommand(
+        var result = await _mediator.Send(new SubmitObservationCommand(
             request.FarmId,
             request.LivestockAnimalId,
             request.LivestockCategoryId,
-            transcript,
-            key,
-            imageUrl,
-            PreAnalyzedVisionJson: visionAnalysisJson);
-
-        var observationId = await _mediator.Send(command, ct);
+            request.RawText,
+            await ObservationsController.ReadAsync(request.AudioFile, ct),
+            request.AudioFile?.FileName,
+            await ObservationsController.ReadAsync(request.ImageFile, ct),
+            key), ct);
 
         return Accepted(new
         {
-            observationId,
-            status = nameof(ObservationConfirmationStatus.Pending),
-            reused = false,
+            observationId = result.Id,
+            status = result.ConfirmationStatus.ToString(),
+            reused = result.Reused,
             request.FarmId,
             request.LivestockAnimalId,
             request.LivestockCategoryId,
-            transcript,
-            imageUrl,
-            visionAnalysis = visionAnalysisJson is null ? null : System.Text.Json.JsonSerializer.Deserialize<object>(visionAnalysisJson),
-            message = "Observation saved as pending. Review and confirm it, then optionally create an incident."
+            transcript = result.RawTranscript,
+            imageUrl = result.ImageUrl,
+            visionAnalysis = result.Vision,
+            analysisSource = result.AnalysisSource,
+            message = result.Reused
+                ? "Existing observation returned for this idempotency key."
+                : "Observation saved as pending. Review and confirm it, then optionally create an incident."
         });
     }
 
@@ -195,7 +124,9 @@ public class ChatController : ControllerBase
             aiRequiresVetConsultation = result.AiRequiresVetConsultation,
             incidentAutoCreated = result.IncidentAutoCreated,
             autoCreatedIncidentId = result.AutoCreatedIncidentId,
-            autoCreatedIncidents = result.AutoCreatedIncidents
+            autoCreatedIncidents = result.AutoCreatedIncidents,
+            assessmentSource = result.AssessmentSource,
+            assessmentIsAi = result.AssessmentIsAi
         });
     }
 
@@ -242,7 +173,8 @@ public class ChatController : ControllerBase
             string.IsNullOrWhiteSpace(request.EvidenceSummary)
                 ? $"Mortality: {observation.MortalityCount}; notes: {observation.FarmerNotes}"
                 : request.EvidenceSummary,
-            request.RuleVersion);
+            request.RuleVersion,
+            observation.Id);
 
         var incidentId = await _mediator.Send(command, ct);
 
@@ -268,7 +200,7 @@ public record CreateIncidentFromObservationRequest(
 
 public record ChatObservationRequest(
     Guid FarmId,
-    string RawText,
+    string? RawText,
     Guid? LivestockAnimalId,
     Guid? LivestockCategoryId,
     string? IdempotencyKey = null,

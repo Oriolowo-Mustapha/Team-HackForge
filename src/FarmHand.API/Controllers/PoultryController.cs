@@ -1,11 +1,14 @@
+using FarmHand.Application.Common.Interfaces;
+using FarmHand.Application.Features.Observations;
 using FarmHand.Application.Features.Poultry;
 using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace FarmHand.API.Controllers;
 
-/// <summary>Poultry observation intake and farmer confirmation.</summary>
+/// <summary>Legacy JSON observation routes. New clients use <c>/api/observations</c>.</summary>
 [ApiController]
 [Route("api/[controller]")]
 [Authorize]
@@ -19,45 +22,41 @@ public class PoultryController : ControllerBase
         _mediator = mediator;
     }
 
-    /// <summary>Record a poultry observation from free text.</summary>
-    /// <remarks>
-    /// The raw text is sent to Gemini (falling back to Groq) for structured extraction.
-    /// Reusing an idempotency key returns the existing observation id.
-    /// Exactly one of LivestockAnimalId or LivestockCategoryId must be supplied.
-    /// </remarks>
-    /// <param name="command">Animal or category id, raw farmer text, idempotency key, and optional image/vision data.</param>
-    /// <param name="ct">Cancellation token.</param>
-    /// <response code="202">Observation accepted. The body contains the new observation id.</response>
-    /// <response code="400">Request validation failed.</response>
-    /// <response code="401">Missing or invalid bearer token.</response>
+    /// <summary>Record an observation from text. Supplying <c>preExtracted</c> stores those fields as a manual entry.</summary>
     [HttpPost("observations")]
-    [ProducesResponseType(StatusCodes.Status202Accepted)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-    public async Task<IActionResult> RecordObservation([FromBody] RecordObservationCommand command, CancellationToken ct)
+    [EnableRateLimiting("ai")]
+    public async Task<IActionResult> RecordObservation([FromBody] LegacyObservationRequest request, CancellationToken ct)
     {
-        var id = await _mediator.Send(command, ct);
-        return Accepted(new { id });
+        var manual = request.PreExtracted is not null;
+        var result = await _mediator.Send(new SubmitObservationCommand(
+            request.FarmId,
+            request.LivestockAnimalId,
+            request.LivestockCategoryId,
+            request.RawText,
+            null, null, null,
+            request.IdempotencyKey,
+            manual,
+            request.PreExtracted?.MortalityCount,
+            request.PreExtracted?.WaterConsumption,
+            request.PreExtracted?.FeedConsumption,
+            request.PreExtracted?.EggProduction), ct);
+        return Accepted(new { id = result.Id });
     }
 
-    /// <summary>Confirm an AI-extracted observation.</summary>
-    /// <remarks>The route id and body ObservationId must match. correctedNotes replaces the farmer notes when supplied.</remarks>
-    /// <param name="observationId">Observation id; must equal the body ObservationId.</param>
-    /// <param name="command">Confirmation payload.</param>
-    /// <param name="ct">Cancellation token.</param>
-    /// <response code="200">Observation confirmed.</response>
-    /// <response code="400">Route id does not match the body, or validation failed.</response>
-    /// <response code="401">Missing or invalid bearer token.</response>
-    /// <response code="404">Observation not found.</response>
+    /// <summary>Confirm a pending observation.</summary>
     [HttpPost("observations/{observationId}/confirm")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [EnableRateLimiting("ai")]
     public async Task<IActionResult> ConfirmObservation(Guid observationId, [FromBody] ConfirmObservationCommand command, CancellationToken ct)
     {
         if (observationId != command.ObservationId) return BadRequest();
-        await _mediator.Send(command, ct);
-        return Ok();
+        return Ok(await _mediator.Send(command, ct));
     }
 }
+
+public record LegacyObservationRequest(
+    Guid FarmId,
+    Guid? LivestockAnimalId,
+    Guid? LivestockCategoryId,
+    string RawText,
+    string IdempotencyKey,
+    ExtractedObservation? PreExtracted = null);

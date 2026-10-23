@@ -33,6 +33,30 @@ public class LivestockAnimalRepository : EfRepository<LivestockAnimal>, ILivesto
     {
         return await DbSet.Where(a => a.FarmId == farmId && a.Species == species && a.IsActive && !a.IsDeleted).ToListAsync(ct);
     }
+
+    public async Task<IReadOnlyList<LivestockAnimal>> SearchAsync(Guid farmId, Guid? categoryId, string? text, string? species, bool includeInactive, CancellationToken ct = default)
+    {
+        var query = DbSet.AsNoTracking().Where(a => a.FarmId == farmId);
+        if (!includeInactive) query = query.Where(a => a.IsActive);
+        if (categoryId is { } category) query = query.Where(a => a.CategoryId == category);
+        if (!string.IsNullOrWhiteSpace(species)) query = query.Where(a => a.Species == species);
+        if (!string.IsNullOrWhiteSpace(text))
+        {
+            var pattern = $"%{text.Trim()}%";
+            query = query.Where(a => EF.Functions.ILike(a.Name, pattern) || (a.Breed != null && EF.Functions.ILike(a.Breed, pattern)));
+        }
+
+        return await query.OrderBy(a => a.Name).ToListAsync(ct);
+    }
+
+    public async Task<IReadOnlyDictionary<Guid, int>> CountActiveByCategoryAsync(Guid farmId, CancellationToken ct = default)
+    {
+        return await DbSet
+            .Where(a => a.FarmId == farmId && a.IsActive)
+            .GroupBy(a => a.CategoryId)
+            .Select(g => new { g.Key, Count = g.Count() })
+            .ToDictionaryAsync(x => x.Key, x => x.Count, ct);
+    }
 }
 
 public class PoultryObservationRepository : EfRepository<PoultryObservation>, IPoultryObservationRepository
@@ -68,5 +92,32 @@ public class PoultryObservationRepository : EfRepository<PoultryObservation>, IP
     public async Task<PoultryObservation?> GetByIdempotencyKeyAsync(string idempotencyKey, CancellationToken ct = default)
     {
         return await DbSet.FirstOrDefaultAsync(o => o.IdempotencyKey == idempotencyKey, ct);
+    }
+
+    public async Task<PagedList<PoultryObservation>> SearchAsync(ObservationSearch search, CancellationToken ct = default)
+    {
+        var query = DbSet.AsNoTracking().Where(o => search.FarmIds.Contains(o.FarmId));
+        if (search.Status is { } status) query = query.Where(o => o.ConfirmationStatus == status);
+        if (search.AnimalId is { } animalId) query = query.Where(o => o.LivestockAnimalId == animalId);
+        if (search.CategoryId is { } categoryId) query = query.Where(o => o.LivestockCategoryId == categoryId);
+
+        var total = await query.CountAsync(ct);
+        var items = await query.OrderByDescending(o => o.RecordedAt).Skip(search.Paging.Skip).Take(search.Paging.PageSize).ToListAsync(ct);
+        return new PagedList<PoultryObservation>(items, total);
+    }
+
+    public async Task<IReadOnlyList<PoultryObservation>> GetByFarmSinceAsync(Guid farmId, DateTime since, CancellationToken ct = default)
+    {
+        return await DbSet.AsNoTracking().Where(o => o.FarmId == farmId && o.RecordedAt >= since).OrderByDescending(o => o.RecordedAt).ToListAsync(ct);
+    }
+
+    public async Task<int> CountPendingAsync(Guid farmId, CancellationToken ct = default)
+    {
+        return await DbSet.CountAsync(o => o.FarmId == farmId && o.ConfirmationStatus == Domain.Enums.ObservationConfirmationStatus.Pending, ct);
+    }
+
+    public async Task<IReadOnlyList<PoultryObservation>> GetRecentByFarmAsync(Guid farmId, int take, CancellationToken ct = default)
+    {
+        return await DbSet.AsNoTracking().Where(o => o.FarmId == farmId).OrderByDescending(o => o.RecordedAt).Take(take).ToListAsync(ct);
     }
 }

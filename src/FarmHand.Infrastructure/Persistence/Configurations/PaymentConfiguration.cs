@@ -30,6 +30,10 @@ public class PaymentConfiguration : IEntityTypeConfiguration<Payment>
             mc.Property(c => c.Currency).HasColumnName("VetPayoutAmountCurrency").HasMaxLength(10);
         });
         builder.Property(x => x.Status).HasMaxLength(50);
+        builder.Property(x => x.Mode).HasMaxLength(20).HasDefaultValue(PaymentMode.Simulated);
+        builder.Property(x => x.ProviderTransactionId).HasMaxLength(100);
+        builder.Property(x => x.FailureReason).HasMaxLength(300);
+        builder.HasIndex(x => x.ProviderTransactionId);
         builder.Property(x => x.TransactionReference).HasMaxLength(200);
         builder.Property(x => x.CheckoutUrl).HasMaxLength(500);
         builder.Property(x => x.IdempotencyKey).HasMaxLength(128);

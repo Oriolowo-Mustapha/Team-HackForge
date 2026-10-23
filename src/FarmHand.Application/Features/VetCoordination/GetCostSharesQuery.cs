@@ -47,10 +47,9 @@ public class GetCostSharesQueryHandler : IRequestHandler<GetCostSharesQuery, Cos
 
     public async Task<CostShareListDto> Handle(GetCostSharesQuery request, CancellationToken ct)
     {
-        await _authorization.EnsureVetRequestAccessAsync(request.VetRequestId, ct);
-
         var vetRequest = await _vetRequestRepository.GetByIdAsync(request.VetRequestId, ct)
             ?? throw new KeyNotFoundException("Vet request not found.");
+        await _authorization.EnsureIncidentAccessAsync(vetRequest.IncidentId, ct);
 
         var shares = (await _costShareRepository.GetByVetRequestIdAsync(request.VetRequestId, ct))
             .OrderBy(s => s.CreatedAt)

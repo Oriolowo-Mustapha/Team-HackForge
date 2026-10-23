@@ -22,7 +22,8 @@ public record CreateIncidentCommand(
     Domain.Enums.Severity Severity,
     string TriggeringObservations,
     string EvidenceSummary,
-    string? RuleVersion = null) : IRequest<Guid>;
+    string? RuleVersion = null,
+    Guid? SourceObservationId = null) : IRequest<Guid>;
 
 public class CreateIncidentCommandHandler : IRequestHandler<CreateIncidentCommand, Guid>
 {
@@ -69,7 +70,8 @@ public class CreateIncidentCommandHandler : IRequestHandler<CreateIncidentComman
             request.Severity,
             request.TriggeringObservations,
             request.EvidenceSummary,
-            request.RuleVersion);
+            request.RuleVersion,
+            request.SourceObservationId);
 
         await _incidentRepository.AddAsync(incident, ct);
         await _unitOfWork.SaveChangesAsync(ct);

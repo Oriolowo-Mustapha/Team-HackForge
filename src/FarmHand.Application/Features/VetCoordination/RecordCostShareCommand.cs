@@ -32,7 +32,11 @@ public class RecordCostShareCommandHandler : IRequestHandler<RecordCostShareComm
 
     public async Task<Unit> Handle(RecordCostShareCommand request, CancellationToken ct)
     {
-        await _authorization.EnsureVetRequestAccessAsync(request.VetRequestId, ct);
+        var vetRequest = await _unitOfWork.VetRequests.GetByIdAsync(request.VetRequestId, ct)
+            ?? throw new KeyNotFoundException("Vet request not found.");
+        var access = await _authorization.GetIncidentAccessAsync(vetRequest.IncidentId, ct);
+        if (access is not (IncidentAccess.Owner or IncidentAccess.Admin))
+            throw new UnauthorizedAccessException("Only the farm owner can record cost-share contributions.");
 
         var costShare = new CostShare(
             request.VetRequestId,

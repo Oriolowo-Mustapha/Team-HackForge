@@ -1,5 +1,6 @@
 using FarmHand.Application.Common.DTOs;
 using FarmHand.Application.Features.Goats;
+using FarmHand.Application.Features.Livestock;
 using FarmHand.Domain.Enums;
 using MediatR;
 using Microsoft.AspNetCore.Authorization;
@@ -74,4 +75,61 @@ public class LivestockController : ControllerBase
     [AllowAnonymous]
     [ProducesResponseType(typeof(AnimalName[]), StatusCodes.Status200OK)]
     public IActionResult GetNames() => Ok(Enum.GetValues<AnimalName>());
+
+    /// <summary>List animals on a farm, optionally filtered by group, species or a name search.</summary>
+    [HttpGet("animals")]
+    [ProducesResponseType(typeof(IReadOnlyList<AnimalDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> ListAnimals(
+        [FromQuery] Guid farmId,
+        [FromQuery] Guid? categoryId,
+        [FromQuery] string? q,
+        [FromQuery] string? species,
+        [FromQuery] bool includeInactive = false,
+        CancellationToken ct = default) =>
+        Ok(await _mediator.Send(new GetAnimalsQuery(farmId, categoryId, q, species, includeInactive), ct));
+
+    /// <summary>Register an animal with its own name or tag.</summary>
+    [HttpPost("animals")]
+    [ProducesResponseType(typeof(AnimalDto), StatusCodes.Status201Created)]
+    public async Task<IActionResult> CreateAnimal([FromBody] CreateAnimalCommand command, CancellationToken ct)
+    {
+        var animal = await _mediator.Send(command, ct);
+        return CreatedAtAction(nameof(GetAnimal), new { animalId = animal.Id }, animal);
+    }
+
+    /// <summary>Animal profile with its observation and case history.</summary>
+    [HttpGet("animals/{animalId:guid}")]
+    [ProducesResponseType(typeof(AnimalDetailDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetAnimal(Guid animalId, CancellationToken ct) =>
+        Ok(await _mediator.Send(new GetAnimalQuery(animalId), ct));
+
+    /// <summary>Update an animal's details and history.</summary>
+    [HttpPut("animals/{animalId:guid}")]
+    [ProducesResponseType(typeof(AnimalDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> UpdateAnimal(Guid animalId, [FromBody] UpdateAnimalCommand command, CancellationToken ct)
+    {
+        if (animalId != command.AnimalId) return BadRequest(new { error = "Route id does not match the body." });
+        return Ok(await _mediator.Send(command, ct));
+    }
+
+    /// <summary>Archive an animal (sold, deceased, moved). History is kept.</summary>
+    [HttpPost("animals/{animalId:guid}/archive")]
+    public async Task<IActionResult> Archive(Guid animalId, CancellationToken ct) =>
+        Ok(await _mediator.Send(new SetAnimalActiveCommand(animalId, false), ct));
+
+    /// <summary>Restore an archived animal.</summary>
+    [HttpPost("animals/{animalId:guid}/restore")]
+    public async Task<IActionResult> Restore(Guid animalId, CancellationToken ct) =>
+        Ok(await _mediator.Send(new SetAnimalActiveCommand(animalId, true), ct));
+
+    /// <summary>Upload a profile photo (multipart field <c>image</c>; JPEG, PNG, WebP or HEIC up to 8 MB).</summary>
+    [HttpPost("animals/{animalId:guid}/photo")]
+    [Consumes("multipart/form-data")]
+    [RequestSizeLimit(12 * 1024 * 1024)]
+    public async Task<IActionResult> UploadPhoto(Guid animalId, IFormFile image, CancellationToken ct)
+    {
+        var bytes = await ObservationsController.ReadAsync(image, ct);
+        if (bytes is null) return BadRequest(new { error = "No image provided." });
+        return Ok(await _mediator.Send(new SetAnimalPhotoCommand(animalId, bytes), ct));
+    }
 }

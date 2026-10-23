@@ -14,6 +14,10 @@ public class VetRequestConfiguration : IEntityTypeConfiguration<VetRequest>
             mc.Property(c => c.Amount).HasColumnName("FarmerCostAmount").HasColumnType("decimal(18,2)");
             mc.Property(c => c.Currency).HasColumnName("FarmerCostCurrency").HasMaxLength(10);
         });
+        builder.Property(x => x.Description).HasMaxLength(1000);
+        builder.Property(x => x.CompletionNotes).HasMaxLength(1000);
+        builder.Property(x => x.DeclineReason).HasMaxLength(500);
+        builder.HasIndex(x => x.VetPartnerId);
         builder.HasIndex(x => x.IncidentId);
         builder.HasIndex(x => x.Status);
 

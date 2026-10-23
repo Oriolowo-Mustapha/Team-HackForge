@@ -17,6 +17,7 @@ public class IncidentConfiguration : IEntityTypeConfiguration<Incident>
         builder.HasIndex(x => x.LivestockAnimalId);
         builder.HasIndex(x => x.LivestockCategoryId);
         builder.HasIndex(x => x.Status);
+        builder.HasIndex(x => x.SourceObservationId);
 
         builder.HasOne<Farm>()
             .WithMany()

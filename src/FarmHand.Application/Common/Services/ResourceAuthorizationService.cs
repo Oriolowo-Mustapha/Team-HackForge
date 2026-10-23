@@ -8,6 +8,8 @@ public class ResourceAuthorizationService : IResourceAuthorizationService
 {
     private readonly ICurrentUserService _currentUser;
     private readonly IUnitOfWork _unitOfWork;
+    private VetPartner? _cachedVet;
+    private bool _vetLoaded;
 
     public ResourceAuthorizationService(ICurrentUserService currentUser, IUnitOfWork unitOfWork)
     {
@@ -15,11 +17,15 @@ public class ResourceAuthorizationService : IResourceAuthorizationService
         _unitOfWork = unitOfWork;
     }
 
-    private async Task<Guid?> GetCurrentVetPartnerIdAsync(CancellationToken ct)
+    public async Task<VetPartner?> GetCurrentVetAsync(CancellationToken ct = default)
     {
-        if (_currentUser.UserId is null) return null;
-        var vetPartner = await _unitOfWork.VetPartners.GetByUserIdAsync(_currentUser.UserId.Value, ct);
-        return vetPartner?.Id;
+        if (_vetLoaded) return _cachedVet;
+        _vetLoaded = true;
+        if (!_currentUser.IsVet || _currentUser.UserId is null) return null;
+
+        var vet = await _unitOfWork.VetPartners.GetByUserIdAsync(_currentUser.UserId.Value, ct);
+        _cachedVet = vet is { IsActive: true } ? vet : null;
+        return _cachedVet;
     }
 
     public async Task<bool> CanAccessFarmAsync(Guid farmId, CancellationToken ct = default)
@@ -34,26 +40,60 @@ public class ResourceAuthorizationService : IResourceAuthorizationService
 
     public async Task EnsureFarmAccessAsync(Guid farmId, CancellationToken ct = default)
     {
-        if (!await CanAccessFarmAsync(farmId, ct))
-            throw new UnauthorizedAccessException("You do not have access to this farm.");
+        var farm = await _unitOfWork.Farms.GetByIdAsync(farmId, ct)
+            ?? throw new KeyNotFoundException($"Farm {farmId} not found.");
+
+        if (_currentUser.IsAdmin) return;
+        if (_currentUser.UserId is { } userId
+            && string.Equals(farm.OwnerId, userId.ToString(), StringComparison.OrdinalIgnoreCase))
+            return;
+
+        throw new UnauthorizedAccessException("You do not have access to this farm.");
     }
 
-    public async Task EnsureIncidentAccessAsync(Guid incidentId, CancellationToken ct = default)
+    public async Task<IReadOnlyList<Guid>?> GetAccessibleFarmIdsAsync(CancellationToken ct = default)
+    {
+        if (_currentUser.IsAdmin) return null;
+        if (_currentUser.UserId is not { } userId) return [];
+        var farms = await _unitOfWork.Farms.ListByOwnerIdAsync(userId.ToString(), ct);
+        return farms.Select(f => f.Id).ToList();
+    }
+
+    public async Task<IncidentAccess> GetIncidentAccessAsync(Guid incidentId, CancellationToken ct = default)
     {
         var incident = await _unitOfWork.Incidents.GetByIdAsync(incidentId, ct)
             ?? throw new KeyNotFoundException($"Incident {incidentId} not found.");
 
+        if (_currentUser.IsAdmin) return IncidentAccess.Admin;
+
         if (_currentUser.IsVet)
         {
-            var vetPartnerId = await GetCurrentVetPartnerIdAsync(ct);
-            if (vetPartnerId is not null)
-            {
-                var assigned = await _unitOfWork.VetRequests.GetByIncidentIdAsync(incidentId, ct);
-                if (assigned.Any(v => v.VetPartnerId == vetPartnerId)) return;
-            }
+            var vet = await GetCurrentVetAsync(ct);
+            if (vet is null) return IncidentAccess.None;
+
+            var requests = await _unitOfWork.VetRequests.GetByIncidentIdAsync(incidentId, ct);
+            if (requests.Any(r => r.VetPartnerId == vet.Id && r.Status is RequestStatus.Responded or RequestStatus.Completed))
+                return IncidentAccess.AssignedVet;
+            if (requests.Any(r => r.Status == RequestStatus.Pending && (r.VetPartnerId == null || r.VetPartnerId == vet.Id)))
+                return IncidentAccess.ProspectiveVet;
+            return IncidentAccess.None;
         }
 
-        await EnsureFarmAccessAsync(incident.FarmId, ct);
+        return await CanAccessFarmAsync(incident.FarmId, ct) ? IncidentAccess.Owner : IncidentAccess.None;
+    }
+
+    public async Task EnsureIncidentAccessAsync(Guid incidentId, CancellationToken ct = default)
+    {
+        var access = await GetIncidentAccessAsync(incidentId, ct);
+        if (access is IncidentAccess.None or IncidentAccess.ProspectiveVet)
+            throw new UnauthorizedAccessException("You do not have access to this case.");
+    }
+
+    public async Task EnsureIncidentWriteAccessAsync(Guid incidentId, CancellationToken ct = default)
+    {
+        var access = await GetIncidentAccessAsync(incidentId, ct);
+        if (access is IncidentAccess.None or IncidentAccess.ProspectiveVet)
+            throw new UnauthorizedAccessException("You cannot change this case.");
     }
 
     public async Task EnsureObservationAccessAsync(Guid observationId, CancellationToken ct = default)
@@ -72,9 +112,13 @@ public class ResourceAuthorizationService : IResourceAuthorizationService
 
         if (_currentUser.IsVet)
         {
-            var vetPartnerId = await GetCurrentVetPartnerIdAsync(ct);
-            if (vetPartnerId is not null && vetRequest.VetPartnerId == vetPartnerId) return;
-            throw new UnauthorizedAccessException("You can only access vet requests assigned to you.");
+            var vet = await GetCurrentVetAsync(ct);
+            if (vet is not null)
+            {
+                if (vetRequest.VetPartnerId == vet.Id) return;
+                if (vetRequest.Status == RequestStatus.Pending && vetRequest.VetPartnerId is null) return;
+            }
+            throw new UnauthorizedAccessException("You can only access vet requests assigned or open to you.");
         }
 
         var incident = await _unitOfWork.Incidents.GetByIdAsync(vetRequest.IncidentId, ct)

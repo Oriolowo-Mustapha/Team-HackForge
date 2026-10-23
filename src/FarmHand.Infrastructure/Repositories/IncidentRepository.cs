@@ -23,4 +23,39 @@ public class IncidentRepository : EfRepository<Incident>, IIncidentRepository
     {
         return await DbSet.FirstOrDefaultAsync(i => i.Id == incidentId, ct);
     }
+
+    public async Task<PagedList<Incident>> SearchAsync(IncidentSearch search, CancellationToken ct = default)
+    {
+        var query = DbSet.AsNoTracking();
+        if (search.FarmIds is not null) query = query.Where(i => search.FarmIds.Contains(i.FarmId));
+        if (search.IncidentIds is not null) query = query.Where(i => search.IncidentIds.Contains(i.Id));
+        if (search.Status is { } status) query = query.Where(i => i.Status == status);
+        if (search.OpenOnly) query = query.Where(i => i.Status != Domain.Enums.IncidentStatus.Resolved);
+        if (search.Severity is { } severity) query = query.Where(i => i.Severity == severity);
+        if (search.AnimalId is { } animalId) query = query.Where(i => i.LivestockAnimalId == animalId);
+        if (search.CategoryId is { } categoryId) query = query.Where(i => i.LivestockCategoryId == categoryId);
+        if (search.From is { } from) query = query.Where(i => i.DetectedAt >= from);
+        if (search.To is { } to) query = query.Where(i => i.DetectedAt <= to);
+        if (!string.IsNullOrWhiteSpace(search.Text))
+        {
+            var pattern = $"%{search.Text.Trim()}%";
+            query = query.Where(i => EF.Functions.ILike(i.IncidentType, pattern) || EF.Functions.ILike(i.EvidenceSummary, pattern));
+        }
+
+        var total = await query.CountAsync(ct);
+        var items = await query
+            .OrderByDescending(i => i.Severity)
+            .ThenByDescending(i => i.DetectedAt)
+            .Skip(search.Paging.Skip)
+            .Take(search.Paging.PageSize)
+            .ToListAsync(ct);
+        return new PagedList<Incident>(items, total);
+    }
+
+    public async Task<IReadOnlyList<Incident>> GetBySourceObservationIdsAsync(IEnumerable<Guid> observationIds, CancellationToken ct = default)
+    {
+        var ids = observationIds.Distinct().ToList();
+        if (ids.Count == 0) return [];
+        return await DbSet.Where(i => i.SourceObservationId != null && ids.Contains(i.SourceObservationId.Value)).ToListAsync(ct);
+    }
 }

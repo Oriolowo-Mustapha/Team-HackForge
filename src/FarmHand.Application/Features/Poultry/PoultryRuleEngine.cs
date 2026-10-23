@@ -61,13 +61,12 @@ public class PoultryRuleEngine : IPoultryRuleEngine
         return FarmHand.Domain.Enums.Severity.Critical;
     }
 
-    private static bool ContainsConcerningKeywords(string notes)
-    {
-        var lower = notes.ToLowerInvariant();
-        return lower.Contains("dead") || lower.Contains("dying")
-            || lower.Contains("sick") || lower.Contains("ill")
-            || lower.Contains("mortality") || lower.Contains("loss");
-    }
+    private static readonly System.Text.RegularExpressions.Regex ConcerningWords = new(
+        @"\b(dead|dying|died|sick|ill|mortality|losses?)\b",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    // Whole-word matching so words like "still" or "will" do not count as "ill".
+    private static bool ContainsConcerningKeywords(string notes) => ConcerningWords.IsMatch(notes);
 
     private static bool VisionAnalysisHasIssues(string visionAnalysisJson)
     {

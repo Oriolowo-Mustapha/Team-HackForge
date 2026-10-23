@@ -8,15 +8,24 @@ using System.Text.Json;
 
 namespace FarmHand.Infrastructure.Payments;
 
+/// <summary>
+/// Flutterwave Standard integration.
+/// <list type="bullet">
+/// <item><b>Live</b>: <c>POST /v3/payments</c> with our own <c>tx_ref</c>; the farmer is redirected to the
+/// hosted checkout; status is confirmed server-side with <c>GET /v3/transactions/verify_by_reference</c>
+/// (or <c>/v3/transactions/{id}/verify</c> for webhooks). Amount and currency always come from the provider.</item>
+/// <item><b>Simulated</b>: no money moves. References are HMAC-signed so only references this server
+/// issued can be confirmed. Every simulated payment is persisted and shown as simulated.</item>
+/// <item><b>Disabled</b>: the default when <c>Flutterwave:Mode</c> is not set; initiation is refused.</item>
+/// </list>
+/// </summary>
 public class FlutterwavePaymentService : IPaymentService
 {
     private readonly HttpClient _httpClient;
     private readonly string _secretKey;
-    private readonly string? _publicKey;
     private readonly string _signingSecret;
     private readonly string _baseUrl;
     private readonly string _redirectUrl;
-    private readonly bool _liveMode;
     private readonly ILogger<FlutterwavePaymentService> _logger;
 
     public FlutterwavePaymentService(
@@ -26,15 +35,25 @@ public class FlutterwavePaymentService : IPaymentService
     {
         _httpClient = httpClient;
         _secretKey = configuration["Flutterwave:SecretKey"] ?? string.Empty;
-        _publicKey = configuration["Flutterwave:PublicKey"];
         _signingSecret = configuration["Flutterwave:SigningSecret"]
             ?? configuration["Jwt:SecretKey"]
             ?? throw new InvalidOperationException("Flutterwave:SigningSecret (or Jwt:SecretKey) is required.");
-        _baseUrl = configuration["Flutterwave:BaseUrl"] ?? "https://api.flutterwave.com/v3";
-        _redirectUrl = configuration["Flutterwave:RedirectUrl"] ?? string.Empty;
-        _liveMode = string.Equals(configuration["Flutterwave:Mode"], "Live", StringComparison.OrdinalIgnoreCase);
+        _baseUrl = (configuration["Flutterwave:BaseUrl"] ?? "https://api.flutterwave.com/v3").TrimEnd('/');
+        var publicUrl = (configuration["App:PublicUrl"] ?? string.Empty).TrimEnd('/');
+        _redirectUrl = configuration["Flutterwave:RedirectUrl"] is { Length: > 0 } configured && !configured.Contains("example.com", StringComparison.OrdinalIgnoreCase)
+            ? configured
+            : $"{publicUrl}/payments/return";
         _logger = logger;
+
+        var mode = configuration["Flutterwave:Mode"];
+        Mode = string.Equals(mode, "Live", StringComparison.OrdinalIgnoreCase) ? "Live"
+            : string.Equals(mode, "Simulated", StringComparison.OrdinalIgnoreCase) ? "Simulated"
+            : "Disabled";
     }
+
+    public string Mode { get; }
+
+    private bool LiveMode => Mode == "Live";
 
     public async Task<PaymentResult> InitiatePaymentAsync(
         Guid vetRequestId,
@@ -45,42 +64,33 @@ public class FlutterwavePaymentService : IPaymentService
         PaymentSplit? split = null,
         CancellationToken ct = default)
     {
+        if (Mode == "Disabled")
+            return new PaymentResult(false, null, "Payments are not configured on this server.");
+
         if (amount <= 0)
             return new PaymentResult(false, null, "Amount must be greater than zero.");
 
         if (string.IsNullOrWhiteSpace(customerEmail))
-            return new PaymentResult(false, null, "A customer email is required to initialize a Flutterwave payment.");
+            return new PaymentResult(false, null, "A customer email is required to initialize a payment.");
 
-        if (!_liveMode)
-            return new PaymentResult(true, CreateSignedReference(vetRequestId), null, null, amount, currency);
+        var reference = CreateSignedReference(vetRequestId);
+
+        if (!LiveMode)
+            return new PaymentResult(true, reference, null, null, amount, currency);
 
         if (string.IsNullOrWhiteSpace(_secretKey))
             return new PaymentResult(false, null, "Payment provider is not configured.");
 
         try
         {
-            var reference = $"FH_{vetRequestId:N}_{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}";
-
-            using var request = new HttpRequestMessage(HttpMethod.Post, $"{_baseUrl.TrimEnd('/')}/payments");
-            request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _secretKey);
-
             var payload = new Dictionary<string, object?>
             {
                 ["tx_ref"] = reference,
                 ["amount"] = amount,
                 ["currency"] = currency.Trim().ToUpperInvariant(),
                 ["redirect_url"] = _redirectUrl,
-                ["customer"] = new
-                {
-                    email = customerEmail.Trim(),
-                    name = customerName ?? string.Empty
-                },
-                ["customizations"] = new
-                {
-                    title = "FarmHand",
-                    description = "Vet request payment",
-                    logo = string.Empty
-                }
+                ["customer"] = new { email = customerEmail.Trim(), name = customerName ?? string.Empty },
+                ["customizations"] = new { title = "FarmHand", description = "Veterinary service payment" }
             };
 
             if (split is not null && !string.IsNullOrWhiteSpace(split.SubaccountId))
@@ -90,114 +100,131 @@ public class FlutterwavePaymentService : IPaymentService
                     new
                     {
                         id = split.SubaccountId,
-                        // The single subaccount receives the remainder after the platform's commission.
-                        transaction_split_ratio = 100,
+                        // The vet's subaccount receives the remainder after the platform's commission.
                         transaction_charge_type = "percentage",
                         transaction_charge = Math.Round(split.PlatformCommissionRate, 6)
                     }
                 };
             }
 
-            request.Content = new StringContent(
-                JsonSerializer.Serialize(payload),
-                Encoding.UTF8,
-                "application/json");
+            using var request = new HttpRequestMessage(HttpMethod.Post, $"{_baseUrl}/payments");
+            request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _secretKey);
+            request.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
 
-            var response = await _httpClient.SendAsync(request, ct);
+            using var response = await _httpClient.SendAsync(request, ct);
             var body = await response.Content.ReadAsStringAsync(ct);
-
             if (!response.IsSuccessStatusCode)
             {
-                _logger.LogWarning("Flutterwave initiation failed: {StatusCode} {Body}", response.StatusCode, body);
-                return new PaymentResult(false, null, "Payment provider rejected the initiation request.");
+                _logger.LogWarning("Flutterwave initiation failed with {StatusCode}", response.StatusCode);
+                return new PaymentResult(false, null, "The payment provider rejected the checkout request.");
             }
 
             using var doc = JsonDocument.Parse(body);
-            var root = doc.RootElement;
-            string? checkoutUrl = null;
-            string? flutterwaveId = null;
+            var link = doc.RootElement.TryGetProperty("data", out var data) && data.TryGetProperty("link", out var linkEl)
+                ? linkEl.GetString()
+                : null;
 
-            if (root.TryGetProperty("data", out var data))
-            {
-                if (data.TryGetProperty("link", out var linkEl))
-                    checkoutUrl = linkEl.GetString();
-                if (data.TryGetProperty("id", out var idEl))
-                    flutterwaveId = idEl.GetString();
-                if (data.TryGetProperty("tx_ref", out var txRefEl))
-                    reference = txRefEl.GetString() ?? reference;
-            }
+            if (string.IsNullOrWhiteSpace(link))
+                return new PaymentResult(false, null, "The payment provider did not return a checkout link.");
 
-            if (string.IsNullOrWhiteSpace(flutterwaveId))
-                return new PaymentResult(false, null, "Payment provider did not return a transaction id.");
-
-            return new PaymentResult(true, flutterwaveId, null, checkoutUrl, amount, currency);
+            return new PaymentResult(true, reference, null, link, amount, currency);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException && !ct.IsCancellationRequested)
         {
             _logger.LogError(ex, "Flutterwave initiation error");
-            return new PaymentResult(false, null, "Payment provider is unavailable.");
+            return new PaymentResult(false, null, "The payment provider is unavailable.");
         }
     }
 
-    public async Task<PaymentResult> VerifyPaymentAsync(string transactionReference, CancellationToken ct = default)
+    public Task<PaymentVerification> VerifyByReferenceAsync(string reference, CancellationToken ct = default)
     {
-        if (string.IsNullOrWhiteSpace(transactionReference))
-            return new PaymentResult(false, null, "A transaction reference is required.");
+        if (string.IsNullOrWhiteSpace(reference))
+            return Task.FromResult(new PaymentVerification(PaymentVerificationOutcome.NotFound, null, null, null, reference, "A reference is required."));
 
-        if (!_liveMode)
-        {
-            return IsValidSignedReference(transactionReference)
-                ? new PaymentResult(true, transactionReference, null)
-                : new PaymentResult(false, null, "Unknown or invalid payment reference.");
-        }
+        if (!IsValidSignedReference(reference))
+            return Task.FromResult(new PaymentVerification(PaymentVerificationOutcome.NotFound, null, null, null, reference, "Unknown payment reference."));
 
+        if (Mode == "Simulated")
+            return Task.FromResult(new PaymentVerification(PaymentVerificationOutcome.Successful, null, null, null, reference, "Simulated payment confirmed. No money was moved."));
+
+        if (!LiveMode)
+            return Task.FromResult(new PaymentVerification(PaymentVerificationOutcome.Error, null, null, null, reference, "Payments are not configured on this server."));
+
+        return QueryAsync($"{_baseUrl}/transactions/verify_by_reference?tx_ref={Uri.EscapeDataString(reference)}", reference, ct);
+    }
+
+    public Task<PaymentVerification> VerifyByTransactionIdAsync(string transactionId, CancellationToken ct = default)
+    {
+        if (!LiveMode)
+            return Task.FromResult(new PaymentVerification(PaymentVerificationOutcome.Error, null, null, null, null, "Transaction-id verification is only available in live mode."));
+
+        if (string.IsNullOrWhiteSpace(transactionId) || !transactionId.All(char.IsDigit))
+            return Task.FromResult(new PaymentVerification(PaymentVerificationOutcome.NotFound, null, null, null, null, "Invalid transaction id."));
+
+        return QueryAsync($"{_baseUrl}/transactions/{transactionId}/verify", null, ct);
+    }
+
+    private async Task<PaymentVerification> QueryAsync(string url, string? expectedReference, CancellationToken ct)
+    {
         if (string.IsNullOrWhiteSpace(_secretKey))
-        {
-            _logger.LogWarning("Flutterwave secret key not configured - payment verification cannot run");
-            return new PaymentResult(false, null, "Payment provider is not configured.");
-        }
+            return new PaymentVerification(PaymentVerificationOutcome.Error, null, null, null, expectedReference, "Payment provider is not configured.");
 
         try
         {
-            using var request = new HttpRequestMessage(HttpMethod.Get, $"{_baseUrl.TrimEnd('/')}/transactions/{transactionReference}/verify");
+            using var request = new HttpRequestMessage(HttpMethod.Get, url);
             request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _secretKey);
+            using var response = await _httpClient.SendAsync(request, ct);
+            var body = await response.Content.ReadAsStringAsync(ct);
 
-            var response = await _httpClient.SendAsync(request, ct);
-            var responseBody = await response.Content.ReadAsStringAsync(ct);
+            if (response.StatusCode is System.Net.HttpStatusCode.NotFound or System.Net.HttpStatusCode.BadRequest)
+                return new PaymentVerification(PaymentVerificationOutcome.NotFound, null, null, null, expectedReference, "The provider has no completed checkout for this reference yet.");
 
             if (!response.IsSuccessStatusCode)
             {
-                _logger.LogWarning("Flutterwave verification failed: {StatusCode} {Body}", response.StatusCode, responseBody);
-                return new PaymentResult(false, null, "Payment verification failed.");
+                _logger.LogWarning("Flutterwave verification failed with {StatusCode}", response.StatusCode);
+                return new PaymentVerification(PaymentVerificationOutcome.Error, null, null, null, expectedReference, "The payment provider could not be reached.");
             }
 
-            using var doc = JsonDocument.Parse(responseBody);
-            var root = doc.RootElement;
-            var data = root.TryGetProperty("data", out var dataEl) ? dataEl : root;
+            using var doc = JsonDocument.Parse(body);
+            if (!doc.RootElement.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Object)
+                return new PaymentVerification(PaymentVerificationOutcome.NotFound, null, null, null, expectedReference, "The provider returned no transaction.");
 
-            var status = data.TryGetProperty("status", out var statusEl)
-                ? statusEl.GetString() ?? string.Empty
-                : string.Empty;
-            var isPaid = string.Equals(status, "successful", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(status, "success", StringComparison.OrdinalIgnoreCase);
+            var status = ReadText(data, "status") ?? string.Empty;
+            var txRef = ReadText(data, "tx_ref");
+            var id = ReadText(data, "id");
+            decimal? amount = data.TryGetProperty("amount", out var amountEl) && amountEl.TryGetDecimal(out var a) ? a : null;
+            var currency = ReadText(data, "currency");
 
-            if (!isPaid)
-                return new PaymentResult(false, transactionReference, "Payment has not been completed.");
+            if (expectedReference is not null && !string.Equals(txRef, expectedReference, StringComparison.Ordinal))
+                return new PaymentVerification(PaymentVerificationOutcome.NotFound, null, null, id, txRef, "The provider returned a different reference.");
 
-            decimal? verifiedAmount = data.TryGetProperty("amount", out var amountEl) && amountEl.TryGetDecimal(out var amount)
-                ? amount
-                : null;
-            string? verifiedCurrency = data.TryGetProperty("currency", out var currencyEl)
-                ? currencyEl.GetString()
-                : null;
+            var outcome = status.ToLowerInvariant() switch
+            {
+                "successful" => PaymentVerificationOutcome.Successful,
+                "failed" or "cancelled" => PaymentVerificationOutcome.Failed,
+                _ => PaymentVerificationOutcome.Pending
+            };
 
-            return new PaymentResult(true, transactionReference, null, null, verifiedAmount, verifiedCurrency);
+            return new PaymentVerification(outcome, amount, currency, id, txRef, $"Provider status: {status}");
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException && !ct.IsCancellationRequested)
         {
             _logger.LogError(ex, "Flutterwave verification error");
-            return new PaymentResult(false, null, "Payment provider is unavailable.");
+            return new PaymentVerification(PaymentVerificationOutcome.Error, null, null, null, expectedReference, "The payment provider could not be reached.");
         }
+    }
+
+    private static string? ReadText(JsonElement element, string propertyName)
+    {
+        if (!element.TryGetProperty(propertyName, out var value))
+            return null;
+
+        return value.ValueKind switch
+        {
+            JsonValueKind.String => value.GetString(),
+            JsonValueKind.Number => value.GetRawText(),
+            _ => null
+        };
     }
 
     private string CreateSignedReference(Guid vetRequestId)
@@ -208,7 +235,7 @@ public class FlutterwavePaymentService : IPaymentService
         return $"FH_{vetRequestId:N}_{timestamp}_{nonce}_{Sign(payload)}";
     }
 
-    private bool IsValidSignedReference(string reference)
+    public bool IsValidSignedReference(string reference)
     {
         var parts = reference.Split('_', StringSplitOptions.RemoveEmptyEntries);
         if (parts.Length != 5 || parts[0] != "FH") return false;
@@ -223,7 +250,7 @@ public class FlutterwavePaymentService : IPaymentService
     private string Sign(string payload)
     {
         using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(_signingSecret));
-        return Convert.ToHexString(hmac.ComputeHash(Encoding.UTF8.GetBytes(payload))).ToLowerInvariant()[..16];
+        return Convert.ToHexString(hmac.ComputeHash(Encoding.UTF8.GetBytes(payload))).ToLowerInvariant()[..24];
     }
 
     public async Task<SubaccountResult> CreateOrUpdateSubaccountAsync(
@@ -231,7 +258,7 @@ public class FlutterwavePaymentService : IPaymentService
         CancellationToken ct = default)
     {
         // Simulated provider: derive a stable fake subaccount id so the split flow is testable.
-        if (!_liveMode)
+        if (!LiveMode)
             return new SubaccountResult(true, $"RS_SIM_{request.VetPartnerId:N}", null);
 
         if (string.IsNullOrWhiteSpace(_secretKey))
@@ -245,8 +272,8 @@ public class FlutterwavePaymentService : IPaymentService
 
             var isUpdate = !string.IsNullOrWhiteSpace(existingSubaccountId);
             var url = isUpdate
-                ? $"{_baseUrl.TrimEnd('/')}/subaccounts/{existingSubaccountId}"
-                : $"{_baseUrl.TrimEnd('/')}/subaccounts";
+                ? $"{_baseUrl}/subaccounts/{Uri.EscapeDataString(existingSubaccountId!)}"
+                : $"{_baseUrl}/subaccounts";
 
             using var httpRequest = new HttpRequestMessage(isUpdate ? HttpMethod.Put : HttpMethod.Post, url);
             httpRequest.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _secretKey);
@@ -269,7 +296,7 @@ public class FlutterwavePaymentService : IPaymentService
                 Encoding.UTF8,
                 "application/json");
 
-            var response = await _httpClient.SendAsync(httpRequest, ct);
+            using var response = await _httpClient.SendAsync(httpRequest, ct);
             var body = await response.Content.ReadAsStringAsync(ct);
 
             if (!response.IsSuccessStatusCode)
@@ -285,33 +312,23 @@ public class FlutterwavePaymentService : IPaymentService
             if (!doc.RootElement.TryGetProperty("data", out var data))
                 return new SubaccountResult(false, null, "The payment provider did not return a subaccount id.");
 
-            var subaccountId = ReadIdentifier(data, "id") ?? ReadIdentifier(data, "subaccount_id");
+            var subaccountId = ReadText(data, "subaccount_id") ?? ReadText(data, "id");
             return string.IsNullOrWhiteSpace(subaccountId)
                 ? new SubaccountResult(false, null, "The payment provider did not return a subaccount id.")
                 : new SubaccountResult(true, subaccountId, null);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException && !ct.IsCancellationRequested)
         {
             _logger.LogError(ex, "Flutterwave subaccount error");
             return new SubaccountResult(false, null, "The payment provider is unavailable.", true);
         }
     }
 
-    private static string? ReadIdentifier(JsonElement data, string propertyName)
-    {
-        if (!data.TryGetProperty(propertyName, out var element))
-            return null;
-
-        return element.ValueKind switch
-        {
-            JsonValueKind.String => element.GetString(),
-            JsonValueKind.Number => element.GetRawText(),
-            _ => null
-        };
-    }
-
     public bool VerifyWebhookSignature(string rawBody, string? flutterwaveSignature, string? verifHash, string secretHash)
     {
+        if (string.IsNullOrWhiteSpace(secretHash))
+            return false;
+
         if (!string.IsNullOrWhiteSpace(flutterwaveSignature))
         {
             using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(secretHash));

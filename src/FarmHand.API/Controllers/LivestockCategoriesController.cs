@@ -1,5 +1,6 @@
 using FarmHand.Application.Common.DTOs;
 using FarmHand.Application.Features.LivestockCategories;
+using FarmHand.Application.Features.Livestock;
 using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -53,4 +54,18 @@ public class LivestockCategoriesController : ControllerBase
         var categories = await _mediator.Send(new GetLivestockCategoriesQuery(farmId), ct);
         return Ok(categories);
     }
+
+    /// <summary>Groups (flocks, herds, pens) with head counts, species and registered-animal counts.</summary>
+    [HttpGet("details")]
+    [ProducesResponseType(typeof(IReadOnlyList<LivestockCategoryDetailDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetGroups([FromQuery] Guid farmId, CancellationToken ct) =>
+        Ok(await _mediator.Send(new GetLivestockGroupsQuery(farmId), ct));
+
+    /// <summary>Rename a group or update its species and head count.</summary>
+    [HttpPut("{categoryId:guid}")]
+    [ProducesResponseType(typeof(LivestockCategoryDetailDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> UpdateGroup(Guid categoryId, [FromBody] UpdateGroupRequest request, CancellationToken ct) =>
+        Ok(await _mediator.Send(new UpdateLivestockGroupCommand(categoryId, request.Name, request.Description, request.Species, request.Headcount), ct));
 }
+
+public record UpdateGroupRequest(string Name, string? Description, string? Species, int? Headcount);

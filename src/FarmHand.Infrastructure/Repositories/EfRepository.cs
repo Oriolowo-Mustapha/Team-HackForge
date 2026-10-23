@@ -26,6 +26,13 @@ public class EfRepository<T> : IRepository<T> where T : BaseEntity
         return await DbSet.ToListAsync(ct);
     }
 
+    public virtual async Task<IReadOnlyList<T>> GetByIdsAsync(IEnumerable<Guid> ids, CancellationToken ct = default)
+    {
+        var list = ids.Distinct().ToList();
+        if (list.Count == 0) return [];
+        return await DbSet.Where(e => list.Contains(e.Id)).ToListAsync(ct);
+    }
+
     public virtual async Task AddAsync(T entity, CancellationToken ct = default)
     {
         await DbSet.AddAsync(entity, ct);

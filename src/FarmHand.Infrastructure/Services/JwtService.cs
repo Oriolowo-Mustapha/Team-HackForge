@@ -9,6 +9,9 @@ namespace FarmHand.Infrastructure.Services;
 
 public class JwtService : IJwtService
 {
+    /// <summary>Present on tokens issued to accounts that must replace a temporary password.</summary>
+    public const string PasswordChangeClaim = "pwd_change_required";
+
     private readonly string _secretKey;
     private readonly string _issuer;
     private readonly string _audience;
@@ -26,7 +29,7 @@ public class JwtService : IJwtService
             : 60;
     }
 
-    public TokenResult GenerateToken(string userId, string email, IEnumerable<string> roles, int tokenVersion = 0)
+    public TokenResult GenerateToken(string userId, string email, IEnumerable<string> roles, int tokenVersion = 0, bool mustChangePassword = false)
     {
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_secretKey));
         var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
@@ -39,6 +42,9 @@ public class JwtService : IJwtService
             new(JwtRegisteredClaimNames.Iat, DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString()),
             new("token_version", tokenVersion.ToString())
         };
+
+        if (mustChangePassword)
+            claims.Add(new Claim(PasswordChangeClaim, "true"));
 
         claims.AddRange(roles.Select(r => new Claim(ClaimTypes.Role, r)));
 

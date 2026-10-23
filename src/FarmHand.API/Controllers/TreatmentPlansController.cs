@@ -59,6 +59,12 @@ public class TreatmentPlansController : ControllerBase
         if (plan is null) return NotFound();
         return Ok(plan);
     }
+
+    /// <summary>Tick off a dated treatment step (farm owner, admin or assigned vet).</summary>
+    [HttpPost("{planId:guid}/steps/{stepId:guid}/complete")]
+    [ProducesResponseType(typeof(TreatmentScheduleItemDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> CompleteStep(Guid planId, Guid stepId, CancellationToken ct) =>
+        Ok(await _mediator.Send(new CompleteTreatmentStepCommand(planId, stepId), ct));
 }
 
 public record GetTreatmentPlanQuery(Guid Id) : IRequest<TreatmentPlanDto?>;

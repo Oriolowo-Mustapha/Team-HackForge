@@ -22,11 +22,8 @@ public class FarmHistoryService : IFarmHistoryService
 
     public async Task<FarmHistoryContext> GetFarmHistoryAsync(Guid farmId, CancellationToken ct = default)
     {
-        var allObservations = await _observationRepository.GetAllAsync(ct);
-        var observations = allObservations
-            .Where(o => o.FarmId == farmId)
-            .OrderByDescending(o => o.RecordedAt)
-            .Take(10)
+        var recent = await _observationRepository.GetRecentByFarmAsync(farmId, 10, ct);
+        var observations = recent
             .Select(o => new RecentObservationSummary(
                 o.Id,
                 o.RecordedAt,
@@ -45,7 +42,7 @@ public class FarmHistoryService : IFarmHistoryService
                 i.Status.ToString()))
             .ToList();
 
-        var livestock = await _livestockAnimalRepository.GetByFarmIdAsync(farmId, ct);
+        var livestock = (await _livestockAnimalRepository.GetByFarmIdAsync(farmId, ct)).Take(25);
         var livestockHistory = livestock
             .Select(l => new LivestockHistorySummary(
                 l.Id,

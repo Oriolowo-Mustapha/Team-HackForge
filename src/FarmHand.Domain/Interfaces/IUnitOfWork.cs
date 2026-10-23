@@ -19,6 +19,7 @@ public interface IUnitOfWork : IDisposable
     IIncidentActionRepository IncidentActions { get; }
     IAuditEventRepository AuditEvents { get; }
     IRefreshTokenRepository RefreshTokens { get; }
+    IPasswordResetTokenRepository PasswordResetTokens { get; }
 
     Task<int> SaveChangesAsync(CancellationToken ct = default);
 }

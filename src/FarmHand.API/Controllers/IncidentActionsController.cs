@@ -59,4 +59,12 @@ public class IncidentActionsController : ControllerBase
         var actions = await _mediator.Send(new GetIncidentActionsQuery(incidentId), ct);
         return Ok(actions);
     }
+
+    /// <summary>Mark an action as done (farm owner, admin or assigned vet).</summary>
+    [HttpPost("{actionId:guid}/complete")]
+    [ProducesResponseType(typeof(IncidentActionDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> Complete(Guid incidentId, Guid actionId, [FromBody] CompleteActionRequest? request, CancellationToken ct) =>
+        Ok(await _mediator.Send(new CompleteIncidentActionCommand(incidentId, actionId, request?.Notes), ct));
 }
+
+public record CompleteActionRequest(string? Notes);
