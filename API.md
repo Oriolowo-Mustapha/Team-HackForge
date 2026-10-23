@@ -1,559 +1,2344 @@
-# FarmHand API Reference
+# FarmHand API
 
-**Version:** v1 (unversioned routes)
-**Base URL (local):** `http://localhost:5037` or `https://localhost:7215`
-**Content type:** `application/json`, except the multipart check-in endpoints
-**Last updated:** 2026-10-22
+Voice-first livestock and poultry health API for farmers, veterinarians, and administrators.
 
-Swagger UI (`/swagger`) is enabled only in Development and includes JWT support.
+This document describes the API implemented by this repository. It is intended as the integration contract for the frontend and as an operational reference for deployment.
+
+Last updated: 2026-10-23
 
 ---
 
 ## Contents
 
-1. [Quick start](#quick-start)
-2. [Authentication and authorization](#authentication-and-authorization)
-3. [Conventions](#conventions)
-4. [Enumerations](#enumerations)
-5. [Endpoint summary](#endpoint-summary)
-6. [Auth](#auth)
-7. [Admin](#admin)
-8. [Farms](#farms)
-9. [Incidents](#incidents)
-10. [Poultry observations](#poultry-observations)
-11. [Chat observations](#chat-observations)
-12. [Voice and image check-ins](#voice-and-image-check-ins)
-13. [Vet coordination](#vet-coordination)
-14. [Payments](#payments)
-15. [Goats and livestock](#goats-and-livestock)
-16. [Health](#health)
-17. [Data models](#data-models)
-18. [Error handling](#error-handling)
-19. [Configuration](#configuration)
-20. [Known limitations](#known-limitations)
+- [Base URLs](#base-urls)
+- [Quick start](#quick-start)
+- [Authentication and authorization](#authentication-and-authorization)
+- [Conventions](#conventions)
+- [Errors](#errors)
+- [Pagination](#pagination)
+- [Enums](#enums)
+- [Endpoint index](#endpoint-index)
+- [Auth](#auth)
+- [Admin](#admin)
+- [Vets](#vets)
+- [Vet account](#vet-account)
+- [Farms](#farms)
+- [Livestock categories](#livestock-categories)
+- [Livestock](#livestock)
+- [Incidents](#incidents)
+- [Incident actions](#incident-actions)
+- [Follow-ups](#follow-ups)
+- [Poultry observations](#poultry-observations)
+- [Chat observations](#chat-observations)
+- [Voice](#voice)
+- [Vet coordination](#vet-coordination)
+- [Treatment plans](#treatment-plans)
+- [Payments](#payments)
+- [Audit events](#audit-events)
+- [Health](#health)
+- [Data models](#data-models)
+- [End-to-end workflows](#end-to-end-workflows)
+- [Configuration](#configuration)
+- [Production checklist](#production-checklist)
+- [Known limitations](#known-limitations)
+
+---
+
+## Base URLs
+
+| Environment | URL |
+| --- | --- |
+| Local HTTP | `http://localhost:5037` |
+| Local HTTPS | `https://localhost:7215` |
+| Swagger UI (Development only) | `http://localhost:5037/swagger` |
+| OpenAPI JSON (Development only) | `http://localhost:5037/swagger/v1/swagger.json` |
+
+All API routes are under `/api`, except `/health`.
+
+Requests and responses are JSON unless an endpoint is marked `multipart/form-data`.
 
 ---
 
 ## Quick start
 
-```powershell
-Copy-Item src/FarmHand.API/appsettings.example.json src/FarmHand.API/appsettings.json
-# Fill in PostgreSQL, JWT, AI, Cloudinary, and a non-placeholder Seed:Password.
-dotnet run --project src/FarmHand.API --launch-profile https
+### 1. Register a farmer
+
+```http
+POST /api/auth/register
+Content-Type: application/json
+
+{
+  "email": "farmer@example.com",
+  "password": "StrongPass123!",
+  "fullName": "Ada Okafor",
+  "phoneNumber": "+2348012345678"
+}
 ```
 
-| Resource | URL |
-|---|---|
-| Swagger UI | `https://localhost:7215/swagger` |
-| OpenAPI JSON | `https://localhost:7215/swagger/v1/swagger.json` |
-| Health check | `https://localhost:7215/health` |
+Response: `201 Created`
 
-Migrations run on startup in Development or when `Database:MigrateOnStartup` is `true`.
-Demo data is seeded only in Development and only when `Seed:Password` is set to a strong,
-non-placeholder value.
+```json
+{
+  "message": "Account created successfully. Please log in to receive your access token."
+}
+```
+
+Registration does **not** return a token.
+
+### 2. Log in
+
+```http
+POST /api/auth/login
+Content-Type: application/json
+
+{
+  "email": "farmer@example.com",
+  "password": "StrongPass123!"
+}
+```
+
+Response: `200 OK`
+
+```json
+{
+  "message": "Login successful.",
+  "userId": "4d6f4b4e-...",
+  "email": "farmer@example.com",
+  "role": "Farmer",
+  "token": "eyJhbGciOiJIUzI1NiIs...",
+  "expiresAt": "2026-10-23T12:00:00Z"
+}
+```
+
+Store `token` and send it on every protected request:
+
+```http
+Authorization: Bearer eyJhbGciOiJIUzI1NiIs...
+```
+
+The access token expires after 60 minutes by default. See [Known limitations](#known-limitations) for the current refresh-token behavior.
+
+### 3. Create a farm
+
+```http
+POST /api/farms
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "displayName": "Green Valley Farm",
+  "location": "Ibadan, Oyo State"
+}
+```
+
+Response: `201 Created`
+
+```json
+{ "id": "8d4b2f6e-..." }
+```
+
+### 4. Add a livestock category, then animals
+
+```http
+POST /api/livestock/categories
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "farmId": "8d4b2f6e-...",
+  "name": "Poultry",
+  "description": "Layer hens"
+}
+```
+
+```http
+POST /api/livestock/records
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "farmId": "8d4b2f6e-...",
+  "categoryId": "1c3a2b44-...",
+  "species": 3,
+  "animalName": 7,
+  "sex": "Female",
+  "approximateAge": 8,
+  "diseaseHistory": null,
+  "recentGestationDate": null,
+  "lastVeterinaryVisit": null,
+  "vaccinations": "Newcastle, week 4",
+  "lastLactationDate": null,
+  "parentage": null
+}
+```
+
+### 5. Record an observation
+
+Text observation:
+
+```http
+POST /api/poultry/observations
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "farmId": "8d4b2f6e-...",
+  "livestockCategoryId": "1c3a2b44-...",
+  "rawText": "Three hens died since yesterday and the rest look weak",
+  "idempotencyKey": "checkin-2026-10-23-001"
+}
+```
+
+Response: `202 Accepted`
+
+```json
+{ "id": "f5d8a8cb-..." }
+```
+
+Then confirm the observation:
+
+```http
+POST /api/poultry/observations/f5d8a8cb-.../confirm
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "observationId": "f5d8a8cb-...",
+  "correctedNotes": "Three hens died since yesterday; the rest are weak",
+  "overrideSeverity": null,
+  "overrideReason": null
+}
+```
+
+If the final severity is `High` (2) or `Critical` (3), an incident is created automatically.
 
 ---
 
 ## Authentication and authorization
 
-| Route | Access |
-|---|---|
-| `POST /api/auth/register` | Anonymous, rate limited |
-| `POST /api/auth/login` | Anonymous, rate limited |
-| `GET /health` | Anonymous |
-| `/api/admin/*` | `Admin` role |
-| All other `/api/*` routes | Any authenticated user, plus resource ownership checks |
+### Token format
 
+- JWT, signed with HMAC-SHA256.
+- Issuer: `FarmHand`.
+- Audience: `FarmHandUsers`.
+- Claims: `nameid` (user id), `email`, `role`, `jti`, `iat`, `token_version`.
+- Default lifetime: 60 minutes.
+
+The token is rejected if the user is inactive or the `token_version` claim no longer matches the user's current version.
+
+### Roles
+
+| Role | Purpose |
+| --- | --- |
+| `Farmer` | Owns farms, livestock, observations, incidents, and vet requests. |
+| `Vet` | Responds to assigned vet requests, records treatment plans and cost shares. |
+| `Admin` | Full administrative access, including vet registration and deactivation. |
+
+### Authorization rules
+
+| Area | Rule |
+| --- | --- |
+| Admin endpoints (`/api/admin/*`) | `Admin` role required. |
+| Vet self-service (`/api/vet/me/*`) | `Vet` role required. |
+| Farm-scoped resources | Admin bypass, otherwise the caller must own the farm (`farm.ownerId == caller userId`). This covers farms, dashboard, categories, livestock, observations, incidents, follow-ups, incident actions, and prevention-plan creation. |
+| Vet requests | A vet may access only a request assigned to their own `VetPartnerId`. Admins bypass. Unassigned requests may be answered by any active vet. |
+| Public endpoints | `POST /api/auth/register`, `POST /api/auth/login`, `POST /api/auth/refresh`, `/health`, `GET /api/livestock/species`, `GET /api/livestock/names`, and `POST /api/payments/webhook`. |
+| Everything else | Valid bearer token required. |
+
+A farmer cannot access a farm owned by another user. A vet cannot use most farm-scoped endpoints; vet access is intentionally limited to assigned vet requests, treatment plans, prevention plans, and payments.
+
+### Auth rate limiting
+
+All `/api/auth/*` endpoints are limited to **10 requests per minute per client IP**.
+
+When exceeded:
+
+```http
+429 Too Many Requests
 ```
-Authorization: Bearer <jwt>
-```
 
-Tokens are HS256 JWTs signed with `Jwt:SecretKey`, with issuer `Jwt:Issuer` (default
-`FarmHand`) and audience `Jwt:Audience` (default `FarmHandUsers`). The key must be at least
-32 bytes; the app fails fast otherwise.
+The response has no JSON body.
 
-Claims: `nameid` (user id), `email`, `role` (`Farmer`, `Vet`, or `Admin`), `jti`, `iat`.
-Default lifetime is `Jwt:ExpirationMinutes` (60 minutes).
+### Token invalidation
 
-Resource rules:
+| Action | Effect |
+| --- | --- |
+| `POST /api/auth/revoke` | Revokes all refresh tokens for the current user. The current access token remains valid until it expires. |
+| `POST /api/auth/change-password` | Changes the password, revokes all refresh tokens, and increments `token_version`, invalidating all existing access tokens. |
+| Admin deactivates a vet | The linked user becomes inactive; all tokens are rejected on the next request. |
+| Admin resets vet credentials | Changes the password, revokes refresh tokens, and increments `token_version`. |
 
-- Farm, observation, incident, livestock, vet request, cost-share, and payment endpoints
-  require the caller to own the underlying farm. Admins bypass ownership checks.
-- Responding to a vet request requires the `Vet` or `Admin` role. A vet may only respond as
-  the `VetPartner` profile linked to their user account.
-- A valid token without the required role or ownership receives `403 Forbidden`.
+### Refresh token behavior
 
-| Condition | Response |
-|---|---|
-| No `Authorization` header | `401 Unauthorized` |
-| Invalid signature, wrong issuer/audience, or expired token | `401 Unauthorized` |
-| Inactive account at login | `401 Unauthorized` |
-| Wrong role or farm ownership | `403 Forbidden` |
-| More than 10 auth attempts per minute per IP | `429 Too Many Requests` |
+`POST /api/auth/refresh` accepts a refresh token and rotates it. However, **login does not currently create or return a refresh token**, so a client cannot obtain one through the normal login flow. In practice, clients should re-authenticate when the access token expires.
+
+This is documented under [Known limitations](#known-limitations) and is not a frontend integration error.
 
 ---
 
 ## Conventions
 
-- **JSON casing:** camelCase.
-- **Ids:** UUID strings.
-- **Timestamps:** ISO 8601 UTC.
-- **Enums:** serialized and accepted as **integers**.
-- **Nullability:** nullable fields are omitted or `null`.
-- **Route casing:** case-insensitive.
+### JSON
+
+- Property names are `camelCase`.
+- IDs are UUID strings.
+- Timestamps are ISO 8601 UTC strings, for example `2026-10-23T09:15:30Z`.
+- Enums are serialized as **integers** unless a field is explicitly documented as a string.
+- Request enum values must be sent as integers. Sending names such as `"High"` fails model binding or validation with `400`.
+
+### Empty responses
+
+Several state-changing endpoints return `200 OK` with an empty body:
+
+- `POST /api/incidents/{incidentId}/status`
+- `POST /api/poultry/observations/{observationId}/confirm`
+- `POST /api/vet-coordination/vet-requests/{vetRequestId}/respond`
+- `POST /api/vet-coordination/vet-requests/{vetRequestId}/cost-share`
+
+Treat a `2xx` status as success; do not attempt to parse a body.
+
+### Dates and times
+
+- Send dates as ISO 8601 strings.
+- Server-generated timestamps are UTC.
+- `followUpDate` on incident status updates accepts a date-time; when omitted for `FollowUpRequired`, the server uses `now + 1 day`.
+
+### Money
+
+- Monetary values are decimal numbers in **NGN**.
+- `Money` defaults to `NGN` when no currency is supplied.
+- Payment initiation requires the currency to match the vet request (`NGN` in the current flow).
+
+### Idempotency
+
+Observation intake accepts a client-generated `idempotencyKey`:
+
+- Text observation: field in the JSON body.
+- Chat observation: optional form field; generated when omitted.
+- Voice check-in: required query parameter.
+- Image check-in: required query parameter.
+
+Reusing a key returns the existing observation instead of creating a duplicate.
+
+### File uploads
+
+Multipart endpoints:
+
+- `POST /api/chat/observation`
+- `POST /api/voice/check-in`
+- `POST /api/voice/image-check-in`
+
+Audio and image size/type limits are enforced by the underlying providers. Send a valid filename and content type.
 
 ---
 
-## Enumerations
+## Errors
+
+Most exceptions are returned as RFC 7807 `ProblemDetails` with `Content-Type: application/problem+json`.
+
+```json
+{
+  "type": "https://farmhand.ai/problems/400",
+  "title": "The request is invalid.",
+  "status": 400,
+  "detail": "Amount must match the vet request charge of 25000 NGN.",
+  "instance": "/api/payments/initiate",
+  "traceId": "0HN7..."
+}
+```
+
+Validation failures add an `errors` object:
+
+```json
+{
+  "type": "https://farmhand.ai/problems/400",
+  "title": "The request is invalid.",
+  "status": 400,
+  "detail": null,
+  "instance": "/api/farms",
+  "traceId": "0HN7...",
+  "errors": {
+    "DisplayName": ["'Display Name' must not be empty."]
+  }
+}
+```
+
+### Status code mapping
+
+| Status | Meaning |
+| --- | --- |
+| `400` | Validation failure, malformed body, route/body ID mismatch, or invalid state transition. |
+| `401` | Missing, invalid, expired, or revoked bearer token; invalid login; invalid refresh token. |
+| `403` | Authenticated but not allowed to access the resource. |
+| `404` | Resource not found, or no prevention/treatment plan exists. |
+| `409` | State conflict (payment required, observation not confirmed, duplicate state). |
+| `415` | Unsupported content type (for example, non-multipart request to an upload endpoint). |
+| `429` | Auth rate limit exceeded. No body. |
+| `500` | Unexpected server error. Details are not exposed. |
+| `502` | Upstream AI, speech, Cloudinary, or payment provider failure. |
+| `503` | Webhook verification is not configured (fail-closed). |
+
+Some controllers return a plain JSON error instead of `ProblemDetails`:
+
+```json
+{ "error": "Invalid email or password." }
+```
+
+This is common on auth, admin, and voice endpoints. Clients should handle both shapes.
+
+---
+
+## Pagination
+
+Paginated endpoints return:
+
+```json
+{
+  "items": [],
+  "page": 1,
+  "pageSize": 20,
+  "totalCount": 0,
+  "totalPages": 0
+}
+```
+
+| Endpoint | Parameters | Behavior |
+| --- | --- | --- |
+| `GET /api/incidents/{farmId}` | `page` (default 1), `pageSize` (default 20) | Rejects `page < 1` and `pageSize < 1` or `> 100` with `400`. |
+| `GET /api/admin/vets` | `page` (default 1), `pageSize` (default 20) | Clamps values instead of rejecting: page minimum 1, page size 1–100. |
+
+Other list endpoints return a plain JSON array.
+
+---
+
+## Enums
 
 ### Severity
 
 | Value | Name |
-|---|---|
-| 0 | Low |
-| 1 | Medium |
-| 2 | High |
-| 3 | Critical |
+| --- | --- |
+| `0` | `Low` |
+| `1` | `Medium` |
+| `2` | `High` |
+| `3` | `Critical` |
 
 ### IncidentStatus
 
 | Value | Name |
-|---|---|
-| 0 | Open |
-| 1 | Acknowledged |
-| 2 | UnderMonitoring |
-| 3 | FollowUpRequired |
-| 4 | Resolved |
-| 5 | Reopened |
+| --- | --- |
+| `0` | `Open` |
+| `1` | `Acknowledged` |
+| `2` | `UnderMonitoring` |
+| `3` | `FollowUpRequired` |
+| `4` | `Resolved` |
+| `5` | `Reopened` |
 
-`Open` is the initial state only and is rejected as an update target.
-
-### ObservationConfirmationStatus
-
-| Value | Name |
-|---|---|
-| 0 | Pending |
-| 1 | Confirmed |
-| 2 | Corrected |
+`Open` is the initial state and is **not** a valid target for a status update.
 
 ### RequestType
 
 | Value | Name |
-|---|---|
-| 0 | RemoteReview |
-| 1 | SharedVisit |
-| 2 | CooperativePlan |
+| --- | --- |
+| `0` | `RemoteReview` |
+| `1` | `SharedVisit` |
+| `2` | `CooperativePlan` |
 
 ### RequestStatus
 
 | Value | Name |
-|---|---|
-| 0 | Pending |
-| 1 | Responded |
-| 2 | Completed |
+| --- | --- |
+| `0` | `Pending` |
+| `1` | `Responded` |
+| `2` | `Completed` |
+
+There is currently no API endpoint that transitions a vet request to `Completed`.
+
+### ObservationConfirmationStatus
+
+| Value | Name |
+| --- | --- |
+| `0` | `Pending` |
+| `1` | `Confirmed` |
+| `2` | `Corrected` |
+
+### Outcome
+
+| Value | Name |
+| --- | --- |
+| `0` | `Improving` |
+| `1` | `Worsening` |
+| `2` | `Resolved` |
+
+### LivestockSpecies
+
+| Value | Name |
+| --- | --- |
+| `0` | `Goat` |
+| `1` | `Sheep` |
+| `2` | `Cattle` |
+| `3` | `Poultry` |
+| `4` | `Pig` |
+| `5` | `Other` |
+
+### AnimalName
+
+| Value | Name |
+| --- | --- |
+| `0` | `Goat01` |
+| `1` | `Goat02` |
+| `2` | `Goat03` |
+| `3` | `Sheep01` |
+| `4` | `Sheep02` |
+| `5` | `Cow01` |
+| `6` | `Cow02` |
+| `7` | `Hen01` |
+| `8` | `Hen02` |
+| `9` | `Other` |
+
+`GET /api/livestock/species` and `GET /api/livestock/names` return these enum values as integer arrays, for example `[0, 1, 2, 3, 4, 5]`.
 
 ---
 
-## Endpoint summary
+## Endpoint index
 
-| Method | Route | Purpose |
-|---|---|---|
-| POST | `/api/auth/register` | Register a farmer and receive a token |
-| POST | `/api/auth/login` | Log in and receive a token |
-| POST | `/api/admin/vets` | Register a vet user and linked profile |
-| GET | `/api/admin/vets` | List vets |
-| DELETE | `/api/admin/vets/{vetId}` | Deactivate a vet and linked user |
-| POST | `/api/farms` | Create a farm owned by the caller |
-| GET | `/api/farms/{farmId}/dashboard` | Farm dashboard |
-| POST | `/api/incidents` | Create an incident |
-| GET | `/api/incidents/{farmId}` | List incidents for a farm |
-| POST | `/api/incidents/{incidentId}/status` | Transition incident status |
-| POST | `/api/poultry/observations` | Record an observation from text |
-| POST | `/api/poultry/observations/{observationId}/confirm` | Confirm an observation |
-| POST | `/api/chat/observation` | Create a pending observation from text/audio/image |
-| POST | `/api/chat/observation/{observationId}/confirm` | Confirm a chat observation |
-| POST | `/api/chat/observation/{observationId}/create-incident` | Create an incident from a confirmed observation |
-| POST | `/api/voice/check-in` | Voice check-in |
-| POST | `/api/voice/image-check-in` | Image check-in |
-| POST | `/api/voice/respond` | Text-to-speech |
-| GET | `/api/voice/voices` | List available voices |
-| POST | `/api/vetcoordination/incidents/{incidentId}/vet-request` | Create a vet request |
-| POST | `/api/vetcoordination/vet-requests/{vetRequestId}/respond` | Vet responds to a request |
-| POST | `/api/vetcoordination/vet-requests/{vetRequestId}/cost-share` | Record a cost-share contribution |
-| GET | `/api/vetcoordination/incidents/{incidentId}/prevention-plan` | Get a prevention plan |
-| POST | `/api/payments/initiate` | Create a pending payment and get a reference |
-| POST | `/api/payments/record` | Verify and complete a payment |
-| POST | `/api/goats/records` | Create a livestock record |
-| GET | `/api/goats/records` | Placeholder listing |
-| GET | `/health` | Health check |
+The API exposes 49 operations: 48 under `/api` plus `/health`.
+
+| Method | Path | Auth | Purpose |
+| --- | --- | --- | --- |
+| `POST` | `/api/auth/register` | Anonymous | Register a farmer. |
+| `POST` | `/api/auth/login` | Anonymous | Log in and receive a JWT. |
+| `POST` | `/api/auth/refresh` | Anonymous | Rotate a refresh token. |
+| `POST` | `/api/auth/revoke` | Bearer | Revoke all refresh tokens. |
+| `POST` | `/api/auth/change-password` | Bearer | Change password and invalidate sessions. |
+| `POST` | `/api/admin/vets` | Admin | Register a vet. |
+| `POST` | `/api/admin/vets/{vetId}/reset-credentials` | Admin | Reset vet credentials and email a temporary password. |
+| `GET` | `/api/admin/vets` | Admin | List vets. |
+| `DELETE` | `/api/admin/vets/{vetId}` | Admin | Deactivate a vet. |
+| `GET` | `/api/vets` | Bearer | List active vets. |
+| `GET` | `/api/vet/me/payout-account` | Vet | Get own payout account. |
+| `PUT` | `/api/vet/me/payout-account` | Vet | Set/update own payout account. |
+| `POST` | `/api/farms` | Bearer | Create a farm. |
+| `GET` | `/api/farms/{farmId}/dashboard` | Bearer | Farm dashboard. |
+| `POST` | `/api/livestock/categories` | Bearer | Create a livestock category. |
+| `GET` | `/api/livestock/categories?farmId=` | Bearer | List categories. |
+| `POST` | `/api/livestock/records` | Bearer | Create a livestock record. |
+| `GET` | `/api/livestock/records?farmId=` | Bearer | List livestock records. |
+| `GET` | `/api/livestock/species` | Anonymous | Species dropdown values. |
+| `GET` | `/api/livestock/names` | Anonymous | Animal-name dropdown values. |
+| `POST` | `/api/incidents` | Bearer | Create an incident. |
+| `GET` | `/api/incidents/{farmId}` | Bearer | List incidents with pagination. |
+| `POST` | `/api/incidents/{incidentId}/status` | Bearer | Change incident status. |
+| `POST` | `/api/incidents/{incidentId}/actions` | Bearer | Create an incident action. |
+| `GET` | `/api/incidents/{incidentId}/actions` | Bearer | List incident actions. |
+| `POST` | `/api/follow-ups` | Bearer | Record a follow-up. |
+| `GET` | `/api/follow-ups?incidentId=` | Bearer | List follow-ups. |
+| `POST` | `/api/poultry/observations` | Bearer | Record a text observation. |
+| `POST` | `/api/poultry/observations/{observationId}/confirm` | Bearer | Confirm an observation. |
+| `POST` | `/api/chat/observation` | Bearer | Record a text/voice/image observation. |
+| `POST` | `/api/chat/observation/{observationId}/confirm` | Bearer | Confirm and assess an observation. |
+| `POST` | `/api/chat/observation/{observationId}/create-incident` | Bearer | Create an incident from a confirmed observation. |
+| `POST` | `/api/voice/check-in` | Bearer | Voice check-in with speech-to-text. |
+| `POST` | `/api/voice/image-check-in` | Bearer | Image check-in with vision analysis. |
+| `POST` | `/api/voice/respond` | Bearer | Text-to-speech response. |
+| `GET` | `/api/voice/voices` | Bearer | List TTS voices. |
+| `POST` | `/api/vet-coordination/incidents/{incidentId}/vet-request` | Bearer | Create a vet request. |
+| `POST` | `/api/vet-coordination/vet-requests/{vetRequestId}/respond` | Vet/Admin | Accept a vet request. |
+| `POST` | `/api/vet-coordination/vet-requests/{vetRequestId}/cost-share` | Bearer | Record a cost-share contribution. |
+| `POST` | `/api/vet-coordination/incidents/{incidentId}/prevention-plan` | Bearer | Create a prevention plan. |
+| `GET` | `/api/vet-coordination/incidents/{incidentId}/prevention-plan` | Bearer | Get a prevention plan. |
+| `POST` | `/api/treatment-plans` | Bearer | Create a treatment plan. |
+| `GET` | `/api/treatment-plans/{id}` | Bearer | Get a treatment plan. |
+| `POST` | `/api/payments/initiate` | Bearer | Initiate a payment. |
+| `POST` | `/api/payments/record` | Bearer | Verify and record a payment. |
+| `POST` | `/api/payments/webhook` | Anonymous | Flutterwave webhook. |
+| `POST` | `/api/audit-events` | Bearer | Record an audit event. |
+| `GET` | `/api/audit-events` | Bearer | List/filter audit events. |
+| `GET` | `/health` | Anonymous | Health probe. |
 
 ---
 
 ## Auth
 
-### POST `/api/auth/register`
+### `POST /api/auth/register`
+
+Registers a farmer account. The role is always `Farmer`; a role cannot be supplied.
+
+**Body**
+
+| Field | Type | Required | Rules |
+| --- | --- | --- | --- |
+| `email` | string | Yes | Valid email, max 255. Normalized to lowercase. |
+| `password` | string | Yes | At least 8 characters and at most 72 UTF-8 bytes. |
+| `fullName` | string | No | Max 200. |
+| `phoneNumber` | string | No | Max 20. |
 
 ```json
 {
   "email": "farmer@example.com",
-  "password": "at-least-8-characters",
-  "fullName": "Mama Funmi",
-  "phoneNumber": "+234-800-000-0000"
+  "password": "StrongPass123!",
+  "fullName": "Ada Okafor",
+  "phoneNumber": "+2348012345678"
 }
 ```
 
-`201 Created`:
+**Response: `201 Created`**
 
 ```json
 {
-  "userId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "message": "Account created successfully. Please log in to receive your access token."
+}
+```
+
+**Errors**
+
+| Status | Reason |
+| --- | --- |
+| `400` | Validation failed or email already registered. |
+| `429` | More than 10 auth attempts in a minute. |
+
+---
+
+### `POST /api/auth/login`
+
+**Body**
+
+```json
+{
+  "email": "farmer@example.com",
+  "password": "StrongPass123!"
+}
+```
+
+**Response: `200 OK`**
+
+```json
+{
+  "message": "Login successful.",
+  "userId": "4d6f4b4e-...",
   "email": "farmer@example.com",
   "role": "Farmer",
-  "token": "<jwt>",
-  "expiresAt": "2026-10-22T13:00:00Z"
+  "token": "eyJhbGciOiJIUzI1NiIs...",
+  "expiresAt": "2026-10-23T12:00:00Z"
 }
 ```
 
-Errors: `400` invalid input, duplicate email, password shorter than 8 characters, or password
-longer than 72 UTF-8 bytes; `429` rate limited.
+**Errors**
 
-### POST `/api/auth/login`
+| Status | Reason |
+| --- | --- |
+| `401` | Invalid email or password, or inactive account. |
+| `429` | Rate limit exceeded. |
+
+The response does **not** include `refreshToken`.
+
+---
+
+### `POST /api/auth/refresh`
+
+**Body**
 
 ```json
-{ "email": "farmer@example.com", "password": "..." }
+{ "refreshToken": "9f2c..." }
 ```
 
-Returns the same shape as register. Unknown emails, wrong passwords, and inactive accounts all
-return `401` with `{ "error": "Invalid email or password." }`.
+**Response: `200 OK`**
+
+```json
+{
+  "message": "Token refreshed.",
+  "userId": "4d6f4b4e-...",
+  "email": "farmer@example.com",
+  "role": "Farmer",
+  "token": "eyJhbGciOiJIUzI1NiIs...",
+  "refreshToken": "b81f...",
+  "expiresAt": "2026-10-23T13:00:00Z"
+}
+```
+
+The old refresh token is revoked and a new one is returned.
+
+**Errors**
+
+| Status | Reason |
+| --- | --- |
+| `401` | Invalid, expired, or revoked refresh token; inactive user. |
+| `429` | Rate limit exceeded. |
+
+See [Known limitations](#known-limitations): login does not issue a refresh token.
+
+---
+
+### `POST /api/auth/revoke`
+
+Requires a bearer token.
+
+Revokes all refresh tokens for the current user.
+
+**Response: `200 OK`**
+
+```json
+{ "message": "All sessions revoked." }
+```
+
+This does not revoke the current access token; it remains valid until expiry.
+
+---
+
+### `POST /api/auth/change-password`
+
+Requires a bearer token.
+
+**Body**
+
+```json
+{
+  "currentPassword": "StrongPass123!",
+  "newPassword": "EvenStronger456!"
+}
+```
+
+`newPassword` must be at least 8 characters (max 100 by model validation) and at most 72 UTF-8 bytes. It must differ from the current password.
+
+**Response: `200 OK`**
+
+```json
+{ "message": "Password changed. Please sign in again." }
+```
+
+All access tokens become invalid because `token_version` is incremented.
+
+**Errors**
+
+| Status | Reason |
+| --- | --- |
+| `400` | Wrong current password, same password, or invalid new password. |
+| `401` | Missing/invalid token or inactive account. |
 
 ---
 
 ## Admin
 
-All admin routes require the `Admin` role.
+All routes require the `Admin` role.
 
-### POST `/api/admin/vets`
+### `POST /api/admin/vets`
+
+Creates a `User` with role `Vet` and a linked `VetPartner` profile, then emails login credentials when email delivery is enabled.
+
+**Body**
+
+| Field | Type | Required | Rules |
+| --- | --- | --- | --- |
+| `email` | string | Yes | Valid email, max 255. |
+| `temporaryPassword` | string | No | If supplied: 8+ characters, max 72 UTF-8 bytes. If omitted, a 14-character password is generated. |
+| `fullName` | string | No | Max 200. Used as the vet partner name; defaults to the email. |
+| `specialization` | string | Yes | Max 100. |
+| `contact` | string | Yes | Max 200. |
+| `phoneNumber` | string | No | Max 20. |
 
 ```json
 {
   "email": "vet@example.com",
-  "temporaryPassword": "at-least-8-characters",
-  "fullName": "Dr. Ade",
-  "specialization": "Poultry health",
-  "contact": "+234-800-000-0001",
-  "phoneNumber": "+234-800-000-0001"
+  "temporaryPassword": null,
+  "fullName": "Dr. Musa Bello",
+  "specialization": "Poultry medicine",
+  "contact": "+2348098765432"
 }
 ```
 
-Creates the `User` and `VetPartner` in one unit of work. `201` returns `vetId`, `userId`,
-`email`, `role`, and `specialization`.
+**Response: `201 Created`**
 
-### GET `/api/admin/vets`
+```json
+{
+  "vetId": "4a2d...",
+  "userId": "98c1...",
+  "email": "vet@example.com",
+  "role": "Vet",
+  "specialization": "Poultry medicine",
+  "credentialsEmailed": true,
+  "message": "Vet doctor registered. Login credentials were emailed."
+}
+```
 
-Returns active and inactive vets:
+The temporary password is never returned by the API.
+
+**Errors**
+
+| Status | Reason |
+| --- | --- |
+| `400` | Validation failed, email already registered, or email delivery disabled while no temporary password was supplied. |
+
+If email delivery fails after the account is created, the response still returns `201` with `credentialsEmailed: false`. An admin must then use the reset-credentials endpoint.
+
+---
+
+### `POST /api/admin/vets/{vetId}/reset-credentials`
+
+Generates a new temporary password, emails it, revokes refresh tokens, and increments the vet user's token version.
+
+**Body:** none.
+
+**Response: `200 OK`**
+
+```json
+{
+  "credentialsEmailed": true,
+  "message": "A new temporary password was emailed to the vet."
+}
+```
+
+**Errors**
+
+| Status | Reason |
+| --- | --- |
+| `400` | Email delivery is disabled. |
+| `404` | Vet or linked user not found. |
+
+If the email fails, the password has still been changed and `credentialsEmailed` is `false`.
+
+---
+
+### `GET /api/admin/vets`
+
+**Query**
+
+| Parameter | Default | Behavior |
+| --- | --- | --- |
+| `page` | `1` | Clamped to at least 1. |
+| `pageSize` | `20` | Clamped to 1–100. |
+
+**Response: `200 OK`**
+
+```json
+{
+  "items": [
+    {
+      "id": "4a2d...",
+      "userId": "98c1...",
+      "name": "Dr. Musa Bello",
+      "email": "vet@example.com",
+      "specialization": "Poultry medicine",
+      "contact": "+2348098765432",
+      "isActive": true,
+      "hasPayoutAccount": true,
+      "createdAt": "2026-10-20T08:00:00Z"
+    }
+  ],
+  "page": 1,
+  "pageSize": 20,
+  "totalCount": 1,
+  "totalPages": 1
+}
+```
+
+---
+
+### `DELETE /api/admin/vets/{vetId}`
+
+Deactivates the vet profile and its linked user.
+
+**Response: `200 OK`**
+
+```json
+{ "message": "Vet deactivated." }
+```
+
+**Errors**
+
+| Status | Reason |
+| --- | --- |
+| `404` | Vet not found. |
+
+---
+
+## Vets
+
+### `GET /api/vets`
+
+Any authenticated user. Returns active vets that can be assigned to a request.
+
+**Response: `200 OK`**
 
 ```json
 [
   {
-    "id": "...",
-    "userId": "...",
-    "name": "Dr. Ade",
-    "email": "vet@example.com",
-    "specialization": "Poultry health",
-    "contact": "+234-800-000-0001",
-    "isActive": true,
-    "createdAt": "2026-10-22T12:00:00Z"
+    "id": "4a2d...",
+    "name": "Dr. Musa Bello",
+    "specialization": "Poultry medicine",
+    "contact": "+2348098765432",
+    "hasPayoutAccount": true
   }
 ]
 ```
 
-### DELETE `/api/admin/vets/{vetId}`
+The list is ordered by name and excludes inactive vets.
 
-Deactivates the vet profile and the linked user account. Returns `{ "message": "Vet deactivated." }`
-or `404`.
+---
+
+## Vet account
+
+Requires the `Vet` role. The current user must have an active linked `VetPartner`.
+
+### `GET /api/vet/me/payout-account`
+
+**Response: `200 OK`**
+
+```json
+{
+  "configured": true,
+  "bankCode": "058",
+  "accountName": "Dr. Musa Bello",
+  "accountNumberMasked": "********6789",
+  "country": "NG",
+  "subaccountConfigured": true
+}
+```
+
+Fields are `null` when not configured. The account number is always masked.
+
+**Errors**
+
+| Status | Reason |
+| --- | --- |
+| `403` | No authenticated vet account, or vet is inactive. |
+| `404` | No vet profile is linked to this account. |
+
+---
+
+### `PUT /api/vet/me/payout-account`
+
+Registers or updates a payout account with the payment provider as a subaccount.
+
+**Body**
+
+| Field | Type | Required | Rules |
+| --- | --- | --- | --- |
+| `bankCode` | string | Yes | 2–20 characters. |
+| `accountNumber` | string | Yes | 6–34 characters. |
+| `accountName` | string | Yes | 3–150 characters. |
+| `country` | string | No | Max 10; defaults to `NG`, uppercased. |
+
+```json
+{
+  "bankCode": "058",
+  "accountNumber": "0123456789",
+  "accountName": "Dr. Musa Bello",
+  "country": "NG"
+}
+```
+
+**Response: `200 OK`**
+
+```json
+{
+  "message": "Payout account saved.",
+  "payoutAccount": {
+    "configured": true,
+    "bankCode": "058",
+    "accountName": "Dr. Musa Bello",
+    "accountNumberMasked": "********6789",
+    "country": "NG",
+    "subaccountConfigured": true
+  }
+}
+```
+
+In simulated payment mode, a stable fake subaccount ID is generated and saved without calling Flutterwave.
+
+**Errors**
+
+| Status | Reason |
+| --- | --- |
+| `400` | Invalid account details or provider rejected the account. |
+| `403` | No authenticated active vet account. |
+| `404` | No linked vet profile. |
+| `502` | Payment provider temporarily unavailable. |
 
 ---
 
 ## Farms
 
-### POST `/api/farms`
+### `POST /api/farms`
+
+The owner is always the authenticated caller. An `ownerId` cannot be supplied.
+
+**Body**
+
+| Field | Type | Required | Rules |
+| --- | --- | --- | --- |
+| `displayName` | string | Yes | Max 200. |
+| `location` | string | Yes | Max 200. |
 
 ```json
-{ "displayName": "Funmi Poultry", "location": "Ibadan" }
+{
+  "displayName": "Green Valley Farm",
+  "location": "Ibadan, Oyo State"
+}
 ```
 
-The owner is derived from the JWT; owner ids cannot be supplied by the client.
-`201 Created` returns `{ "id": "<farmId>" }`.
+**Response: `201 Created`**
 
-### GET `/api/farms/{farmId}/dashboard`
+```json
+{ "id": "8d4b2f6e-..." }
+```
 
-Returns a `DashboardDto`:
+---
+
+### `GET /api/farms/{farmId}/dashboard`
+
+**Response: `200 OK`**
 
 ```json
 {
   "farm": {
-    "id": "...",
-    "ownerId": "<user id string>",
-    "displayName": "Funmi Poultry",
-    "location": "Ibadan",
-    "createdAt": "2026-10-22T12:00:00Z"
+    "id": "8d4b2f6e-...",
+    "ownerId": "4d6f4b4e-...",
+    "displayName": "Green Valley Farm",
+    "location": "Ibadan, Oyo State",
+    "createdAt": "2026-10-20T08:00:00Z"
   },
-  "incidents": [],
-  "actionPlan": { "urgent": [], "scheduled": [], "routine": [] },
-  "vetRequests": []
+  "incidents": [
+    {
+      "id": "8f1c...",
+      "farmId": "8d4b2f6e-...",
+      "livestockAnimalId": null,
+      "livestockCategoryId": "1c3a2b44-...",
+      "detectedAt": "2026-10-23T09:00:00Z",
+      "incidentType": "AI Auto-Detected",
+      "severity": 2,
+      "triggeringObservations": "Observation f5d8...",
+      "evidenceSummary": "Suspected Newcastle disease",
+      "status": 0,
+      "ruleVersion": "ai-assessment",
+      "followUpDate": "2026-10-24T09:00:00Z",
+      "resolvedAt": null
+    }
+  ],
+  "actionPlan": {
+    "urgent": ["Review incident 8f1c...: AI Auto-Detected"],
+    "scheduled": [],
+    "routine": [
+      "Record daily poultry observations",
+      "Check goat breeding reminders",
+      "Inspect crop plots"
+    ]
+  },
+  "vetRequests": [
+    {
+      "id": "3b7a...",
+      "incidentId": "8f1c...",
+      "requestType": 1,
+      "status": 1,
+      "farmerCost": 25000,
+      "respondedAt": "2026-10-23T10:00:00Z"
+    }
+  ]
 }
 ```
 
-`403` when the caller does not own the farm; `404` when it does not exist.
-`vetRequests` is currently always empty.
+`vetRequests` is populated from the farm's vet requests. `actionPlan.routine` is a static list, not derived from farm data.
+
+**Errors**
+
+| Status | Reason |
+| --- | --- |
+| `403` | Caller does not own the farm. |
+| `404` | Farm not found. |
+
+---
+
+## Livestock categories
+
+### `POST /api/livestock/categories`
+
+**Body**
+
+| Field | Type | Required | Rules |
+| --- | --- | --- | --- |
+| `farmId` | uuid | Yes | Must be owned by the caller. |
+| `name` | string | Yes | Max 100. |
+| `description` | string | No | Max 500. |
+
+```json
+{
+  "farmId": "8d4b2f6e-...",
+  "name": "Poultry",
+  "description": "Layer hens"
+}
+```
+
+**Response: `201 Created`**
+
+```json
+{ "id": "1c3a2b44-..." }
+```
+
+**Errors**
+
+| Status | Reason |
+| --- | --- |
+| `403` | Farm belongs to another user. |
+
+---
+
+### `GET /api/livestock/categories?farmId={farmId}`
+
+**Response: `200 OK`**
+
+```json
+[
+  {
+    "id": "1c3a2b44-...",
+    "farmId": "8d4b2f6e-...",
+    "name": "Poultry",
+    "description": "Layer hens",
+    "animalCount": 120
+  }
+]
+```
+
+**Errors**
+
+| Status | Reason |
+| --- | --- |
+| `403` | Farm belongs to another user. |
+
+---
+
+## Livestock
+
+### `POST /api/livestock/records`
+
+**Body**
+
+| Field | Type | Required | Rules |
+| --- | --- | --- | --- |
+| `farmId` | uuid | Yes | Must be owned by the caller. |
+| `categoryId` | uuid | Yes | Must belong to the same farm. |
+| `species` | integer | Yes | `LivestockSpecies` 0–5. |
+| `animalName` | integer | Yes | `AnimalName` 0–9. |
+| `sex` | string | Yes | Max 20; free text (for example `Female`, `Male`). |
+| `approximateAge` | integer | No | Months; 0 or greater. |
+| `diseaseHistory` | string | No | Free text. |
+| `recentGestationDate` | datetime | No | Must not be in the future. |
+| `lastVeterinaryVisit` | datetime | No | Must not be in the future. |
+| `vaccinations` | string | No | Free text; comma-separated conventions. |
+| `lastLactationDate` | datetime | No | Must not be in the future. |
+| `parentage` | string | No | Free text. |
+
+```json
+{
+  "farmId": "8d4b2f6e-...",
+  "categoryId": "1c3a2b44-...",
+  "species": 3,
+  "animalName": 7,
+  "sex": "Female",
+  "approximateAge": 8,
+  "diseaseHistory": null,
+  "recentGestationDate": null,
+  "lastVeterinaryVisit": null,
+  "vaccinations": "Newcastle, week 4",
+  "lastLactationDate": null,
+  "parentage": null
+}
+```
+
+**Response: `201 Created`**
+
+```json
+{ "id": "c1a9..." }
+```
+
+**Errors**
+
+| Status | Reason |
+| --- | --- |
+| `403` | Farm belongs to another user. |
+| `404` | Category not found. |
+
+---
+
+### `GET /api/livestock/records?farmId={farmId}`
+
+**Response: `200 OK`**
+
+```json
+[
+  {
+    "id": "c1a9...",
+    "farmId": "8d4b2f6e-...",
+    "categoryId": "1c3a2b44-...",
+    "name": "Hen01",
+    "species": "Poultry",
+    "breed": null,
+    "ageMonths": 8,
+    "gender": "Female",
+    "isActive": true,
+    "createdAt": "2026-10-20T08:00:00Z",
+    "diseaseHistory": null,
+    "recentGestationDate": null,
+    "lastVeterinaryVisit": null,
+    "vaccinations": "Newcastle, week 4",
+    "lastLactationDate": null,
+    "parentage": null
+  }
+]
+```
+
+Note the response naming differences from the create request:
+
+- Request `animalName` (integer) becomes response `name` (string).
+- Request `species` (integer) becomes response `species` (string enum name).
+- Request `sex` becomes response `gender`.
+- Request `approximateAge` becomes response `ageMonths`.
+- `breed` is stored but is not set by the create endpoint, so it is `null`.
+
+**Errors**
+
+| Status | Reason |
+| --- | --- |
+| `403` | Caller does not own the farm. |
+
+---
+
+### `GET /api/livestock/species`
+
+Anonymous. Returns the integer values of `LivestockSpecies`.
+
+```json
+[0, 1, 2, 3, 4, 5]
+```
+
+### `GET /api/livestock/names`
+
+Anonymous. Returns the integer values of `AnimalName`.
+
+```json
+[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+```
 
 ---
 
 ## Incidents
 
-### POST `/api/incidents`
+### `POST /api/incidents`
+
+`detectedAt` is assigned by the server and cannot be supplied.
+
+**Body**
+
+| Field | Type | Required | Rules |
+| --- | --- | --- | --- |
+| `farmId` | uuid | Yes | Must be owned by the caller. |
+| `livestockAnimalId` | uuid | Conditional | At least one of `livestockAnimalId` or `livestockCategoryId` is required. Must belong to the farm. |
+| `livestockCategoryId` | uuid | Conditional | Must belong to the farm. |
+| `incidentType` | string | Yes | Max 100. |
+| `severity` | integer | Yes | `Severity` 0–3. |
+| `triggeringObservations` | string | Yes | Max 1000. |
+| `evidenceSummary` | string | Yes | Max 1000. |
+| `ruleVersion` | string | No | Optional detection-rule version. |
 
 ```json
 {
-  "farmId": "...",
-  "livestockAnimalId": "...",
-  "livestockCategoryId": null,
+  "farmId": "8d4b2f6e-...",
+  "livestockAnimalId": null,
+  "livestockCategoryId": "1c3a2b44-...",
   "incidentType": "Mortality spike",
   "severity": 2,
-  "triggeringObservations": "Three days of elevated mortality",
-  "evidenceSummary": "Mortality exceeded threshold",
-  "ruleVersion": "v1"
+  "triggeringObservations": "Three deaths in 24 hours",
+  "evidenceSummary": "Possible Newcastle disease",
+  "ruleVersion": "manual"
 }
 ```
 
-At least one of `livestockAnimalId` or `livestockCategoryId` is required. The referenced
-animal/category must belong to `farmId`. `DetectedAt` is assigned by the server.
-`201 Created` returns `{ "id": "<incidentId>" }`.
-
-### GET `/api/incidents/{farmId}`
-
-Returns `IncidentDto[]` for the farm, newest first, with no pagination. Requires farm ownership.
-
-### POST `/api/incidents/{incidentId}/status`
+**Response: `201 Created`**
 
 ```json
-{ "incidentId": "...", "newStatus": 2, "followUpDate": "2026-10-25T09:00:00Z" }
+{ "id": "8f1c..." }
 ```
 
-The route id and body `incidentId` must match. `newStatus` must be `1`-`5`; `0` (Open) and
-unknown values return `400`. `FollowUpRequired` defaults `followUpDate` to now + 1 day.
-Returns `200` on success, `403` for another farm, `404` when missing.
+**Errors**
+
+| Status | Reason |
+| --- | --- |
+| `400` | Validation failed, or animal/category does not belong to the farm. |
+| `403` | Caller does not own the farm. |
+| `404` | Animal or category not found. |
+
+---
+
+### `GET /api/incidents/{farmId}`
+
+**Query**
+
+| Parameter | Default | Rules |
+| --- | --- | --- |
+| `page` | `1` | Must be at least 1. |
+| `pageSize` | `20` | Must be 1–100. |
+
+**Response: `200 OK`**
+
+```json
+{
+  "items": [
+    {
+      "id": "8f1c...",
+      "farmId": "8d4b2f6e-...",
+      "livestockAnimalId": null,
+      "livestockCategoryId": "1c3a2b44-...",
+      "detectedAt": "2026-10-23T09:00:00Z",
+      "incidentType": "Mortality spike",
+      "severity": 2,
+      "triggeringObservations": "Three deaths in 24 hours",
+      "evidenceSummary": "Possible Newcastle disease",
+      "status": 0,
+      "ruleVersion": "manual",
+      "followUpDate": null,
+      "resolvedAt": null
+    }
+  ],
+  "page": 1,
+  "pageSize": 20,
+  "totalCount": 1,
+  "totalPages": 1
+}
+```
+
+**Errors**
+
+| Status | Reason |
+| --- | --- |
+| `400` | Invalid pagination. |
+| `403` | Caller does not own the farm. |
+
+---
+
+### `POST /api/incidents/{incidentId}/status`
+
+The route `incidentId` must equal the body `incidentId`.
+
+**Body**
+
+| Field | Type | Required | Rules |
+| --- | --- | --- | --- |
+| `incidentId` | uuid | Yes | Must match the route. |
+| `newStatus` | integer | Yes | `IncidentStatus` 1–5. `Open` (0) is rejected. |
+| `followUpDate` | datetime | No | Used for `UnderMonitoring` and `FollowUpRequired`; defaults to `now + 1 day` for `FollowUpRequired`. |
+
+```json
+{
+  "incidentId": "8f1c...",
+  "newStatus": 3,
+  "followUpDate": "2026-10-25T09:00:00Z"
+}
+```
+
+**Response: `200 OK`** with empty body.
+
+**Errors**
+
+| Status | Reason |
+| --- | --- |
+| `400` | Route/body mismatch, unknown status, `Open`, or invalid follow-up date. |
+| `403` | Caller does not own the farm. |
+| `404` | Incident not found. |
+
+---
+
+## Incident actions
+
+### `POST /api/incidents/{incidentId}/actions`
+
+The route `incidentId` must equal the body `incidentId`.
+
+**Body**
+
+| Field | Type | Required | Rules |
+| --- | --- | --- | --- |
+| `incidentId` | uuid | Yes | Must match the route. |
+| `description` | string | Yes | Max 500. |
+| `priority` | string | Yes | Max 50; free text. |
+
+```json
+{
+  "incidentId": "8f1c...",
+  "description": "Isolate affected birds",
+  "priority": "High"
+}
+```
+
+**Response: `201 Created`**
+
+```json
+{ "id": "2e4f..." }
+```
+
+**Errors**
+
+| Status | Reason |
+| --- | --- |
+| `400` | Route/body mismatch or validation failed. |
+| `403` | Caller does not own the related farm. |
+| `404` | Incident not found. |
+
+---
+
+### `GET /api/incidents/{incidentId}/actions`
+
+**Response: `200 OK`**
+
+```json
+[
+  {
+    "id": "2e4f...",
+    "incidentId": "8f1c...",
+    "description": "Isolate affected birds",
+    "priority": "High",
+    "status": "Pending",
+    "completedAt": null,
+    "completionNotes": null
+  }
+]
+```
+
+There is currently no endpoint that completes an action, so `status` remains `Pending` through the API.
+
+**Errors**
+
+| Status | Reason |
+| --- | --- |
+| `403` | Caller does not own the related farm. |
+| `404` | Incident not found. |
+
+---
+
+## Follow-ups
+
+### `POST /api/follow-ups`
+
+**Body**
+
+| Field | Type | Required | Rules |
+| --- | --- | --- | --- |
+| `incidentId` | uuid | Yes | Must exist. |
+| `farmerResponse` | integer | Yes | `Outcome` 0–2. |
+| `notes` | string | No | Free text. |
+
+```json
+{
+  "incidentId": "8f1c...",
+  "farmerResponse": 0,
+  "notes": "Birds are eating again"
+}
+```
+
+**Response: `201 Created`**
+
+```json
+{ "id": "7a1b..." }
+```
+
+**Errors**
+
+| Status | Reason |
+| --- | --- |
+| `403` | Caller does not own the related farm. |
+| `404` | Incident not found. |
+
+---
+
+### `GET /api/follow-ups?incidentId={incidentId}`
+
+**Response: `200 OK`**
+
+```json
+[
+  {
+    "id": "7a1b...",
+    "incidentId": "8f1c...",
+    "farmerResponse": 0,
+    "notes": "Birds are eating again",
+    "recordedAt": "2026-10-23T10:30:00Z"
+  }
+]
+```
+
+**Errors**
+
+| Status | Reason |
+| --- | --- |
+| `403` | Caller does not own the related farm. |
+| `404` | Incident not found. |
 
 ---
 
 ## Poultry observations
 
-### POST `/api/poultry/observations`
+These endpoints accept text and run AI extraction server-side.
+
+### `POST /api/poultry/observations`
+
+**Body**
+
+| Field | Type | Required | Rules |
+| --- | --- | --- | --- |
+| `farmId` | uuid | Yes | Must be owned by the caller. |
+| `livestockAnimalId` | uuid | Conditional | At least one of animal/category is required. |
+| `livestockCategoryId` | uuid | Conditional | At least one of animal/category is required. |
+| `rawText` | string | Yes | 1–2000 characters. |
+| `idempotencyKey` | string | Yes | 1–128 characters. |
+| `imageUrl` | string | No | If supplied, triggers vision analysis. |
+| `preExtracted` | object | No | Internal pre-extraction payload; not part of the supported client contract. |
+| `preAnalyzedVisionJson` | string | No | Internal precomputed vision JSON; not part of the supported client contract. |
+
+If both animal and category are supplied, the category must match the animal's category.
 
 ```json
 {
-  "farmId": "...",
-  "livestockAnimalId": "...",
-  "livestockCategoryId": null,
-  "rawText": "Two birds died today and water intake is low",
-  "idempotencyKey": "client-generated-key",
-  "imageUrl": null
+  "farmId": "8d4b2f6e-...",
+  "livestockAnimalId": null,
+  "livestockCategoryId": "1c3a2b44-...",
+  "rawText": "Three hens died since yesterday and the rest look weak",
+  "idempotencyKey": "checkin-2026-10-23-001"
 }
 ```
 
-At least one of `livestockAnimalId` or `livestockCategoryId` is required. Reusing an
-`idempotencyKey` returns the existing observation id. The server extracts structured fields with
-Gemini (Groq fallback) and stores the observation as `Pending`.
-`202 Accepted` returns `{ "id": "<observationId>" }`.
-
-### POST `/api/poultry/observations/{observationId}/confirm`
+**Response: `202 Accepted`**
 
 ```json
-{ "observationId": "...", "correctedNotes": "Optional replacement notes" }
+{ "id": "f5d8a8cb-..." }
 ```
 
-The route id and body `observationId` must match. `correctedNotes`, when supplied, replaces the
-farmer notes. Returns `200`, `403`, or `404`.
+`mortalityCount` extracted by the AI must be between 0 and 10,000, or the request fails with `400`.
+
+**Errors**
+
+| Status | Reason |
+| --- | --- |
+| `400` | Validation failed, invalid AI extraction, or animal/category mismatch. |
+| `403` | Caller does not own the farm. |
+| `404` | Farm, animal, or category not found. |
+
+---
+
+### `POST /api/poultry/observations/{observationId}/confirm`
+
+Confirms the observation and runs an AI severity assessment using farm history. If the final severity is `High` or `Critical`, an incident is auto-created.
+
+The route `observationId` must equal the body `observationId`.
+
+**Body**
+
+| Field | Type | Required | Rules |
+| --- | --- | --- | --- |
+| `observationId` | uuid | Yes | Must match the route. |
+| `correctedNotes` | string | No | Replaces the extracted farmer notes. |
+| `overrideSeverity` | integer | No | `Severity` 0–3; overrides the AI severity. |
+| `overrideReason` | string | No | Max 1000; recorded in incident evidence when an override occurs. |
+
+```json
+{
+  "observationId": "f5d8a8cb-...",
+  "correctedNotes": "Three hens died since yesterday; the rest are weak",
+  "overrideSeverity": 2,
+  "overrideReason": "Farmer reports rapid spread"
+}
+```
+
+**Response: `200 OK`** with empty body.
+
+The result object (AI severity, diagnosis, auto-created incident) is not returned by this endpoint. Use the chat confirm endpoint if the client needs those fields.
+
+**Errors**
+
+| Status | Reason |
+| --- | --- |
+| `400` | Route/body mismatch or validation failed. |
+| `403` | Caller does not own the related farm. |
+| `404` | Observation not found. |
 
 ---
 
 ## Chat observations
 
-### POST `/api/chat/observation`
+Chat supports text, audio, and image input in one multipart request.
 
-`multipart/form-data` fields:
+### `POST /api/chat/observation`
 
-| Field | Type | Required |
-|---|---|---|
-| `farmId` | uuid | yes |
-| `livestockAnimalId` | uuid | one of animal/category |
-| `livestockCategoryId` | uuid | one of animal/category |
-| `rawText` | string | required unless `audioFile` is supplied |
-| `audioFile` | file | optional |
-| `imageFile` | file | optional |
-| `idempotencyKey` | string | optional; generated when omitted |
+`Content-Type: multipart/form-data`
 
-Creates a `Pending` observation. Audio is transcribed with YarnGPT; images are uploaded to
-Cloudinary and analyzed with Groq Vision. `202` returns the observation id, transcript,
-extracted fields, optional image URL, and vision analysis.
+**Form fields**
 
-### POST `/api/chat/observation/{observationId}/confirm`
+| Field | Type | Required | Rules |
+| --- | --- | --- | --- |
+| `farmId` | uuid | Yes | Must be owned by the caller. |
+| `rawText` | string | Yes | Declared required by the model. When audio is supplied, the transcript replaces it. |
+| `livestockAnimalId` | uuid | Conditional | At least one of animal/category is required. |
+| `livestockCategoryId` | uuid | Conditional | At least one of animal/category is required. |
+| `idempotencyKey` | string | No | Generated when omitted. |
+| `audioFile` | file | No | Transcribed by YarnGPT; the transcript becomes `rawText`. |
+| `imageFile` | file | No | Uploaded to Cloudinary and analyzed by the vision service. |
+
+If `imageFile` is supplied, `visionAnalysis` is added to the observation.
+
+**Response: `202 Accepted`**
 
 ```json
-{ "correctedNotes": "Optional replacement notes" }
+{
+  "observationId": "b4e1...",
+  "status": "Pending",
+  "farmId": "8d4b2f6e-...",
+  "livestockAnimalId": null,
+  "livestockCategoryId": "1c3a2b44-...",
+  "transcript": "Three hens died since yesterday",
+  "imageUrl": "https://res.cloudinary.com/...",
+  "visionAnalysis": {
+    "description": "Several lethargic birds",
+    "detectedIssues": ["ruffled feathers"],
+    "confidence": 0.82,
+    "analyzedAt": "2026-10-23T09:10:00Z"
+  },
+  "message": "Observation saved as pending. Review and confirm it, then optionally create an incident."
+}
 ```
 
-Only the observation id and corrected notes are trusted. Does not create an incident.
-Returns `200`, `403`, or `404`.
+`status` is the string `Pending`, not an integer.
 
-### POST `/api/chat/observation/{observationId}/create-incident`
+**Errors**
+
+| Status | Reason |
+| --- | --- |
+| `400` | Missing farm, animal/category, text, or audio. |
+| `403` | Farm or animal belongs to another user. |
+| `404` | Farm, animal, or category not found. |
+
+---
+
+### `POST /api/chat/observation/{observationId}/confirm`
+
+Runs the AI assessment and returns the full result. A repeated confirm is idempotent and does not create duplicate incidents.
+
+**Body**
+
+```json
+{
+  "correctedNotes": "Three hens died since yesterday",
+  "overrideSeverity": 2,
+  "overrideReason": "Rapid spread"
+}
+```
+
+| Field | Type | Required | Rules |
+| --- | --- | --- | --- |
+| `correctedNotes` | string | No | Replaces farmer notes. |
+| `overrideSeverity` | integer | No | `Severity` 0–3. |
+| `overrideReason` | string | No | Max 1000. |
+
+**Response: `200 OK`**
+
+```json
+{
+  "observationId": "b4e1...",
+  "status": "Confirmed",
+  "aiSeverity": "Medium",
+  "finalSeverity": "High",
+  "severityOverridden": true,
+  "aiDiagnosisSummary": "Possible Newcastle disease",
+  "aiRecommendedAction": "Isolate affected birds and contact a vet",
+  "aiRequiresVetConsultation": true,
+  "incidentAutoCreated": true,
+  "autoCreatedIncidentId": "8f1c...",
+  "autoCreatedIncidents": [
+    {
+      "id": "8f1c...",
+      "farmId": "8d4b2f6e-...",
+      "livestockAnimalId": null,
+      "livestockCategoryId": "1c3a2b44-...",
+      "detectedAt": "2026-10-23T09:15:00Z",
+      "incidentType": "AI Auto-Detected",
+      "severity": 2,
+      "triggeringObservations": "Observation b4e1...: Possible Newcastle disease",
+      "evidenceSummary": "Three hens died since yesterday",
+      "status": 0,
+      "ruleVersion": "ai-assessment",
+      "followUpDate": null,
+      "resolvedAt": null
+    }
+  ]
+}
+```
+
+`aiSeverity`, `finalSeverity`, and `status` are strings. `autoCreatedIncidents` is usually empty or contains one incident.
+
+Incidents are auto-created only when the **final** severity is `High` or `Critical`.
+
+**Errors**
+
+| Status | Reason |
+| --- | --- |
+| `403` | Observation belongs to another user. |
+| `404` | Observation not found. |
+
+---
+
+### `POST /api/chat/observation/{observationId}/create-incident`
+
+Creates an additional incident from a confirmed observation. Farm, animal, and category are derived from the stored observation.
+
+**Body**
+
+| Field | Type | Required | Rules |
+| --- | --- | --- | --- |
+| `severity` | integer | Yes | `Severity` 0–3. |
+| `incidentType` | string | No | Defaults to `Poultry Observation`. |
+| `triggeringObservations` | string | No | Defaults to `Observation {id}`. Max 1000 through command validation. |
+| `evidenceSummary` | string | No | Defaults to mortality and notes. Max 1000. |
+| `ruleVersion` | string | No | Optional. |
 
 ```json
 {
   "severity": 2,
-  "incidentType": "Poultry Observation",
-  "triggeringObservations": "Optional override",
-  "evidenceSummary": "Optional override",
-  "ruleVersion": "v1"
+  "incidentType": "Suspected Newcastle",
+  "triggeringObservations": "Three deaths in 24 hours",
+  "evidenceSummary": "Lethargy and ruffled feathers",
+  "ruleVersion": "manual"
 }
 ```
 
-Farm, animal, and category are derived from the stored observation. The observation must not be
-`Pending`, otherwise the endpoint returns `409`. `201` returns `{ "incidentId": "..." }`.
+**Response: `201 Created`**
+
+```json
+{
+  "incidentId": "9a2c...",
+  "message": "Incident created from observation. Vet attention recommended."
+}
+```
+
+**Errors**
+
+| Status | Reason |
+| --- | --- |
+| `403` | Observation belongs to another user. |
+| `404` | Observation not found. |
+| `409` | Observation is still `Pending`; confirm it first. |
+
+This endpoint does not check whether confirm already auto-created an incident, so calling it after a `High`/`Critical` confirm creates another incident.
 
 ---
 
-## Voice and image check-ins
+## Voice
 
-### POST `/api/voice/check-in`
+### `POST /api/voice/check-in`
 
-`multipart/form-data`: `audioFile` plus query parameters `farmId`, `idempotencyKey`, and at least
-one of `livestockAnimalId` / `livestockCategoryId`.
+`Content-Type: multipart/form-data`
 
-Transcribes audio, extracts structured fields, and stores a pending observation.
-`202` returns `observationId`, `transcript`, `extracted`, and `creditsCharged`.
+Audio is transcribed by YarnGPT, then structured by Gemini/Groq.
 
-### POST `/api/voice/image-check-in`
+**Query parameters**
 
-`multipart/form-data`: `imageFile` plus query parameters `farmId`, `idempotencyKey`, at least one
-of `livestockAnimalId` / `livestockCategoryId`, and optional `farmerNotes`.
+| Parameter | Type | Required | Rules |
+| --- | --- | --- | --- |
+| `farmId` | uuid | Yes | Must be owned by the caller. |
+| `idempotencyKey` | string | Yes | Non-empty. Reusing it returns the existing observation. |
+| `livestockAnimalId` | uuid | Conditional | At least one of animal/category is required. |
+| `livestockCategoryId` | uuid | Conditional | At least one of animal/category is required. |
 
-Uploads the image, runs vision analysis, extracts fields, and stores a pending observation.
-`202` returns the observation id, image URL, vision analysis, and extracted fields.
+**Form fields**
 
-### POST `/api/voice/respond`
+| Field | Type | Required |
+| --- | --- | --- |
+| `audioFile` | file | Yes |
+
+**Response: `202 Accepted`**
 
 ```json
-{ "text": "Give the birds clean water", "voice": "umar", "targetLanguage": "yoruba" }
+{
+  "observationId": "f0a1...",
+  "transcript": "Two goats are coughing and not eating",
+  "extracted": {
+    "mortalityCount": 0,
+    "waterConsumption": null,
+    "feedConsumption": "reduced",
+    "eggProduction": null,
+    "farmerNotes": "Two goats are coughing and not eating"
+  },
+  "creditsCharged": 1
+}
 ```
 
-`200` returns `{ "audioUrl": "...", "creditsCharged": 1 }`; provider failures return `502`.
+**Errors**
 
-### GET `/api/voice/voices`
+| Status | Reason |
+| --- | --- |
+| `400` | Missing audio, idempotency key, farm, or animal/category. |
+| `403` | Farm or animal belongs to another user. |
+| `404` | Farm, animal, or category not found. |
+| `502` | Speech-to-text or AI provider failure. |
 
-Returns the provider's voice list; provider failures return `502`.
+---
+
+### `POST /api/voice/image-check-in`
+
+`Content-Type: multipart/form-data`
+
+**Query parameters**
+
+| Parameter | Type | Required | Rules |
+| --- | --- | --- | --- |
+| `farmId` | uuid | Yes | Must be owned by the caller. |
+| `idempotencyKey` | string | Yes | Non-empty. |
+| `livestockAnimalId` | uuid | Conditional | At least one of animal/category is required. |
+| `livestockCategoryId` | uuid | Conditional | At least one of animal/category is required. |
+| `farmerNotes` | string | No | Combined with vision output for extraction. |
+
+**Form fields**
+
+| Field | Type | Required |
+| --- | --- | --- |
+| `imageFile` | file | Yes |
+
+**Response: `202 Accepted`**
+
+```json
+{
+  "observationId": "cc12...",
+  "imageUrl": "https://res.cloudinary.com/...",
+  "visionAnalysis": {
+    "description": "Crowded poultry pen with wet litter",
+    "detectedIssues": ["wet litter", "overcrowding"],
+    "confidence": 0.78
+  },
+  "extracted": {
+    "mortalityCount": 0,
+    "waterConsumption": null,
+    "feedConsumption": null,
+    "eggProduction": null,
+    "farmerNotes": "Pen looks wet"
+  }
+}
+```
+
+**Errors**
+
+Same as voice check-in.
+
+---
+
+### `POST /api/voice/respond`
+
+Converts vet instructions to speech.
+
+**Body**
+
+| Field | Type | Required | Rules |
+| --- | --- | --- | --- |
+| `text` | string | Yes | Non-empty. |
+| `voice` | string | No | Defaults to `umar`. |
+| `targetLanguage` | string | No | For example `yoruba` or `pidgin`. |
+
+```json
+{
+  "text": "Isolate the affected birds and give clean water.",
+  "voice": "umar",
+  "targetLanguage": "pidgin"
+}
+```
+
+**Response: `200 OK`**
+
+```json
+{
+  "audioUrl": "https://.../response.mp3",
+  "creditsCharged": 1
+}
+```
+
+**Errors**
+
+| Status | Reason |
+| --- | --- |
+| `400` | Missing text. |
+| `502` | Speech synthesis unavailable. |
+
+---
+
+### `GET /api/voice/voices`
+
+**Response: `200 OK`**
+
+```json
+["umar", "chioma", "tunde"]
+```
+
+The exact list depends on the YarnGPT provider.
+
+**Errors**
+
+| Status | Reason |
+| --- | --- |
+| `502` | Voice provider unavailable. |
 
 ---
 
 ## Vet coordination
 
-### POST `/api/vetcoordination/incidents/{incidentId}/vet-request`
+### `POST /api/vet-coordination/incidents/{incidentId}/vet-request`
+
+Creates a vet request for an incident. The route `incidentId` must equal the body `incidentId`.
+
+**Body**
+
+| Field | Type | Required | Rules |
+| --- | --- | --- | --- |
+| `incidentId` | uuid | Yes | Must match the route. |
+| `requestType` | integer | Yes | `RequestType` 0–2. |
+| `farmerCost` | decimal | Yes | 0 or greater, in NGN. |
+| `vetPartnerId` | uuid | No | If supplied, the vet must exist and be active. |
 
 ```json
-{ "incidentId": "...", "requestType": 0, "farmerCost": 2500 }
+{
+  "incidentId": "8f1c...",
+  "requestType": 1,
+  "farmerCost": 25000,
+  "vetPartnerId": "4a2d..."
+}
 ```
 
-Requires farm ownership for the incident. `202` returns `{ "id": "<vetRequestId>" }`.
-
-### POST `/api/vetcoordination/vet-requests/{vetRequestId}/respond`
+**Response: `202 Accepted`**
 
 ```json
-{ "vetRequestId": "...", "vetPartnerId": null }
+{ "id": "3b7a..." }
 ```
 
-Requires the `Vet` or `Admin` role. A vet's linked active `VetPartner` profile is used
-automatically; a requested `vetPartnerId` must match it. Returns `200`, `403`, or `404`.
+**Errors**
 
-### POST `/api/vetcoordination/vet-requests/{vetRequestId}/cost-share`
+| Status | Reason |
+| --- | --- |
+| `400` | Route/body mismatch, validation failed, or selected vet unavailable. |
+| `403` | Caller cannot access the incident. |
+| `404` | Incident not found. |
+
+---
+
+### `POST /api/vet-coordination/vet-requests/{vetRequestId}/respond`
+
+Marks a request as `Responded`. Requires the `Vet` or `Admin` role.
+
+Before responding, the request must have a `Completed` payment when `farmerCost > 0`.
+
+**Body**
+
+| Field | Type | Required | Rules |
+| --- | --- | --- | --- |
+| `vetRequestId` | uuid | Yes | Must match the route. |
+| `vetPartnerId` | uuid | No | Optional. A vet may only supply their own partner id; it is inferred when omitted. |
 
 ```json
-{ "vetRequestId": "...", "payerType": "coop", "amount": 500 }
+{
+  "vetRequestId": "3b7a...",
+  "vetPartnerId": null
+}
 ```
 
-Requires access to the vet request's farm. Returns `200`, `400`, `403`, or `404`.
+**Response: `200 OK`** with empty body.
 
-### GET `/api/vetcoordination/incidents/{incidentId}/prevention-plan`
+**Errors**
 
-Returns `{ "content": "..." }`, `403` for another farm, or `404` when no plan exists.
+| Status | Reason |
+| --- | --- |
+| `400` | Route/body mismatch or validation failed. |
+| `403` | Not a vet/admin, no active vet profile, or request assigned to another vet. |
+| `404` | Vet request not found. |
+| `409` | Payment is required but not completed. |
+
+Unassigned requests may be answered by any active vet. Once assigned, only that vet or an admin may respond.
+
+---
+
+### `POST /api/vet-coordination/vet-requests/{vetRequestId}/cost-share`
+
+Records a contribution toward the cost. The route `vetRequestId` must equal the body `vetRequestId`.
+
+**Body**
+
+| Field | Type | Required | Rules |
+| --- | --- | --- | --- |
+| `vetRequestId` | uuid | Yes | Must match the route. |
+| `payerType` | string | Yes | Non-empty; free text such as `farmer`, `coop`, `insurer`. |
+| `amount` | decimal | Yes | 0 or greater. |
+
+```json
+{
+  "vetRequestId": "3b7a...",
+  "payerType": "coop",
+  "amount": 10000
+}
+```
+
+**Response: `200 OK`** with empty body.
+
+**Errors**
+
+| Status | Reason |
+| --- | --- |
+| `400` | Route/body mismatch or validation failed. |
+| `403` | Caller cannot access the vet request. |
+| `404` | Vet request not found. |
+
+---
+
+### `POST /api/vet-coordination/incidents/{incidentId}/prevention-plan`
+
+Creates a prevention plan. The route `incidentId` must equal the body `incidentId`.
+
+Farm owners can create prevention plans; a vet without farm ownership cannot.
+
+**Body**
+
+| Field | Type | Required | Rules |
+| --- | --- | --- | --- |
+| `incidentId` | uuid | Yes | Must match the route. |
+| `content` | string | Yes | 1–2000 characters. |
+| `generatedFromHistory` | boolean | No | Defaults to `true`. |
+
+```json
+{
+  "incidentId": "8f1c...",
+  "content": "Vaccinate new birds and quarantine arrivals for 14 days.",
+  "generatedFromHistory": true
+}
+```
+
+**Response: `201 Created`**
+
+```json
+{ "id": "d7c4..." }
+```
+
+**Errors**
+
+| Status | Reason |
+| --- | --- |
+| `400` | Route/body mismatch or validation failed. |
+| `403` | Caller does not own the related farm. |
+| `404` | Incident not found. |
+
+---
+
+### `GET /api/vet-coordination/incidents/{incidentId}/prevention-plan`
+
+**Response: `200 OK`**
+
+```json
+{
+  "id": "d7c4...",
+  "incidentId": "8f1c...",
+  "content": "Vaccinate new birds and quarantine arrivals for 14 days.",
+  "generatedFromHistory": true
+}
+```
+
+**Errors**
+
+| Status | Reason |
+| --- | --- |
+| `403` | Caller cannot access the incident. |
+| `404` | No prevention plan exists, or the incident was not found. |
+
+---
+
+## Treatment plans
+
+### `POST /api/treatment-plans`
+
+**Body**
+
+| Field | Type | Required | Rules |
+| --- | --- | --- | --- |
+| `vetRequestId` | uuid | Yes | Must exist and be accessible. |
+| `authoredByVetId` | string | Yes | 1–255 characters. Client-supplied; the server does not verify it against the authenticated vet. |
+| `instructionsText` | string | Yes | 1–2000 characters. |
+| `language` | string | No | Max 10. |
+
+```json
+{
+  "vetRequestId": "3b7a...",
+  "authoredByVetId": "4a2d...",
+  "instructionsText": "Isolate affected birds and administer the prescribed antibiotic for five days.",
+  "language": "en"
+}
+```
+
+**Response: `201 Created`**
+
+```json
+{ "id": "ee91..." }
+```
+
+**Errors**
+
+| Status | Reason |
+| --- | --- |
+| `400` | Validation failed. |
+| `403` | Caller cannot access the related incident. |
+| `404` | Vet request not found. |
+
+---
+
+### `GET /api/treatment-plans/{id}`
+
+**Response: `200 OK`**
+
+```json
+{
+  "id": "ee91...",
+  "vetRequestId": "3b7a...",
+  "authoredByVetId": "4a2d...",
+  "instructionsText": "Isolate affected birds and administer the prescribed antibiotic for five days.",
+  "language": "en"
+}
+```
+
+**Errors**
+
+| Status | Reason |
+| --- | --- |
+| `403` | Caller cannot access the related incident. |
+| `404` | Treatment plan or vet request not found. |
+
+There is no endpoint to list treatment plans for a vet request.
 
 ---
 
 ## Payments
 
-### POST `/api/payments/initiate`
+Payments are intended to be **pay-before-visit**:
 
-```json
-{ "vetRequestId": "...", "amount": 2500, "currency": "NGN" }
-```
+1. Farmer creates a vet request with `farmerCost`.
+2. Farmer initiates payment.
+3. Farmer completes checkout with Flutterwave (or the simulated flow).
+4. Payment is recorded directly or by webhook.
+5. Vet responds only after a `Completed` payment exists.
 
-Creates a pending `Payment` owned by the caller's farm and returns
-`{ "transactionReference": "...", "checkoutUrl": "..." }`. The `checkoutUrl` is the Flutterwave
-checkout link the payer should be redirected to. In `Simulated` mode the reference is HMAC-signed
-and no provider call is made; `Live` mode calls Flutterwave.
+### Amount semantics
 
-### POST `/api/payments/record`
+| Field | Meaning |
+| --- | --- |
+| `farmerCost` | The vet's charge. |
+| `platformCommission` | 5% of `farmerCost`. |
+| `totalAmount` | `farmerCost + platformCommission` (105% of the vet charge). |
+| `vetPayoutAmount` | The full vet charge. |
+
+Example: `farmerCost = 25,000 NGN` → commission `1,250`, total `26,250`, vet payout `25,000`.
+
+### `POST /api/payments/initiate`
+
+**Body**
+
+| Field | Type | Required | Rules |
+| --- | --- | --- | --- |
+| `vetRequestId` | uuid | Yes | Must be accessible to the caller. |
+| `amount` | decimal | Yes | Must equal the vet request's `farmerCost`. |
+| `currency` | string | Yes | 3–10 characters; must match the vet request currency (`NGN`). |
 
 ```json
 {
-  "vetRequestId": "...",
-  "amount": 2500,
-  "currency": "NGN",
-  "transactionReference": "..."
+  "vetRequestId": "3b7a...",
+  "amount": 25000,
+  "currency": "NGN"
 }
 ```
 
-The reference must exist as a pending payment for the same vet request. Amount and currency must
-match the initiated payment. The provider verifies the reference, then the payment is marked
-`Completed`. Repeating a successful record is idempotent. Returns `{ "status": "paid" }`.
+**Response: `200 OK`**
 
-| Condition | Response |
-|---|---|
-| Unknown reference | `404` |
-| Reference belongs to another vet request | `400` |
-| Amount or currency mismatch | `400` |
-| Payment status is neither Pending nor Completed | `409` |
-| Provider verification fails | `409` |
+```json
+{
+  "transactionReference": "FH_3b7a..._1761210000_a1b2c3d4e5f6_9f8e7d6c5b4a3210",
+  "checkoutUrl": null,
+  "platformCommission": 1250,
+  "totalAmount": 26250,
+  "vetPayoutAmount": 25000,
+  "vetSubaccountUsed": true
+}
+```
+
+In **live mode**, `checkoutUrl` is the Flutterwave checkout link and `transactionReference` is the Flutterwave transaction ID.
+
+In **simulated mode** (`Flutterwave:Mode` is not `Live`):
+
+- No Flutterwave call is made.
+- `checkoutUrl` is `null`.
+- `transactionReference` is a signed local reference.
+- `POST /api/payments/record` accepts that reference.
+
+If the assigned vet has a payout account, the payment is split automatically and `vetSubaccountUsed` is `true`.
+
+**Errors**
+
+| Status | Reason |
+| --- | --- |
+| `400` | Validation failed, or amount/currency does not match the vet request. |
+| `403` | Vet request belongs to another farm, or no customer email is available. |
+| `404` | Vet request not found. |
+| `502` | Payment provider unavailable or rejected the request. |
 
 ---
 
-## Goats and livestock
+### `POST /api/payments/record`
 
-### POST `/api/goats/records`
+Verifies the payment with the provider and marks it completed.
+
+**Body**
+
+| Field | Type | Required | Rules |
+| --- | --- | --- | --- |
+| `vetRequestId` | uuid | Yes | Must match the initiated payment. |
+| `amount` | decimal | Yes | Must equal the initiated `totalAmount` (including commission). |
+| `currency` | string | Yes | Must match the initiated currency. |
+| `transactionReference` | string | Yes | The reference returned by initiate. Max 200. |
 
 ```json
 {
-  "farmId": "...",
-  "categoryId": "...",
-  "species": "goat",
-  "animalName": "Bisi",
-  "sex": "female",
-  "approximateAge": 18
+  "vetRequestId": "3b7a...",
+  "amount": 26250,
+  "currency": "NGN",
+  "transactionReference": "FH_3b7a..._1761210000_a1b2c3d4e5f6_9f8e7d6c5b4a3210"
 }
 ```
 
-Requires farm ownership and a category from the same farm. The record is persisted before the id
-is returned. `201` returns `{ "id": "<livestockAnimalId>" }`.
+**Response: `200 OK`**
 
-### GET `/api/goats/records`
+```json
+{ "status": "paid" }
+```
 
-Placeholder: returns `{ "message": "Goat records endpoint" }`.
+Repeating a successful record is idempotent.
+
+**Errors**
+
+| Status | Reason |
+| --- | --- |
+| `400` | Validation failed or amount/currency mismatch. |
+| `403` | Vet request belongs to another farm. |
+| `404` | Unknown payment reference or vet request. |
+| `409` | Payment is not pending or verified amount/currency does not match. |
+| `502` | Provider verification failed or unavailable. |
+
+---
+
+### `POST /api/payments/webhook`
+
+Anonymous, but authenticated by a signature.
+
+Flutterwave posts charge events here. Supported success events:
+
+- `charge.completed`
+- `payment.completed`
+
+with `data.status == "successful"`.
+
+**Headers**
+
+| Header | Verification |
+| --- | --- |
+| `flutterwave-signature` | Base64-encoded HMAC-SHA256 of the raw request body, keyed with `Flutterwave:WebhookSecretHash`. |
+| `verif-hash` | Compared directly with `Flutterwave:WebhookSecretHash`. |
+
+At least one header is required.
+
+**Behavior**
+
+- If `Flutterwave:WebhookSecretHash` is not configured: `503` (fail-closed).
+- Invalid or missing signature: `401` (empty body).
+- Invalid JSON after a valid signature: `400` with `{ "error": "Invalid webhook payload." }`.
+- Successful charge: verifies the transaction, finds the pending payment by Flutterwave ID or `tx_ref`, and marks it `Completed`.
+- Other events: `200` and ignored.
+
+**Response: `200 OK`** with empty body.
+
+The webhook does not use the caller's bearer token.
+
+---
+
+## Audit events
+
+### `POST /api/audit-events`
+
+Any authenticated user can create an audit event.
+
+**Body**
+
+| Field | Type | Required | Rules |
+| --- | --- | --- | --- |
+| `actorId` | string | Yes | 1–255 characters, client-supplied. |
+| `eventType` | string | Yes | 1–100 characters. |
+| `relatedRecordId` | uuid | No | Optional. |
+| `details` | string | No | Max 1000. |
+
+```json
+{
+  "actorId": "4d6f4b4e-...",
+  "eventType": "incident.reviewed",
+  "relatedRecordId": "8f1c...",
+  "details": "Farmer reviewed the incident"
+}
+```
+
+**Response: `201 Created`**
+
+```json
+{ "id": "ab12..." }
+```
+
+---
+
+### `GET /api/audit-events`
+
+Any authenticated user can read audit events.
+
+**Query**
+
+| Parameter | Required | Behavior |
+| --- | --- | --- |
+| `actorId` | No | Filters by actor id. Ignored when `eventType` is supplied. |
+| `eventType` | No | Filters by event type; takes precedence over `actorId`. |
+
+With neither filter, all events are returned.
+
+**Response: `200 OK`**
+
+```json
+[
+  {
+    "id": "ab12...",
+    "actorId": "4d6f4b4e-...",
+    "eventType": "incident.reviewed",
+    "relatedRecordId": "8f1c...",
+    "timestamp": "2026-10-23T10:45:00Z",
+    "details": "Farmer reviewed the incident"
+  }
+]
+```
+
+The audit endpoints are not admin-restricted, and `actorId` is not verified against the JWT.
 
 ---
 
 ## Health
 
-`GET /health` returns `200` with `{ "status": "healthy", "timestamp": "..." }`. It does not probe
-the database.
+### `GET /health`
+
+Anonymous.
+
+**Response: `200 OK`**
+
+```json
+{
+  "status": "healthy",
+  "timestamp": "2026-10-23T10:50:00Z"
+}
+```
+
+This endpoint does not check the database or external providers.
 
 ---
 
@@ -561,73 +2346,280 @@ the database.
 
 ### FarmDto
 
-`id`, `ownerId`, `displayName`, `location`, `createdAt`.
+| Field | Type |
+| --- | --- |
+| `id` | uuid |
+| `ownerId` | string |
+| `displayName` | string |
+| `location` | string |
+| `createdAt` | datetime |
 
 ### IncidentDto
 
-`id`, `farmId`, `livestockAnimalId?`, `livestockCategoryId?`, `detectedAt`, `incidentType`,
-`severity`, `triggeringObservations`, `evidenceSummary`, `status`, `ruleVersion?`,
-`followUpDate?`, `resolvedAt?`.
-
-### PoultryObservationDto
-
-`id`, `farmId`, `livestockAnimalId?`, `livestockCategoryId?`, `recordedAt`, `mortalityCount`,
-`waterConsumption?`, `feedConsumption?`, `eggProduction?`, `farmerNotes?`, `confirmationStatus`.
-
-### DashboardDto
-
-`farm`, `incidents`, `actionPlan` (`urgent`, `scheduled`, `routine`), `vetRequests`.
+| Field | Type |
+| --- | --- |
+| `id` | uuid |
+| `farmId` | uuid |
+| `livestockAnimalId` | uuid? |
+| `livestockCategoryId` | uuid? |
+| `detectedAt` | datetime |
+| `incidentType` | string |
+| `severity` | integer |
+| `triggeringObservations` | string |
+| `evidenceSummary` | string |
+| `status` | integer |
+| `ruleVersion` | string? |
+| `followUpDate` | datetime? |
+| `resolvedAt` | datetime? |
 
 ### VetRequestDto
 
-`id`, `incidentId`, `requestType`, `status`, `farmerCost`, `respondedAt?`.
+| Field | Type |
+| --- | --- |
+| `id` | uuid |
+| `incidentId` | uuid |
+| `requestType` | integer |
+| `status` | integer |
+| `farmerCost` | decimal |
+| `respondedAt` | datetime? |
+
+### ActionPlanDto
+
+| Field | Type |
+| --- | --- |
+| `urgent` | string[] |
+| `scheduled` | string[] |
+| `routine` | string[] |
+
+### LivestockCategoryDto
+
+| Field | Type |
+| --- | --- |
+| `id` | uuid |
+| `farmId` | uuid |
+| `name` | string |
+| `description` | string? |
+| `animalCount` | integer |
+
+### LivestockRecordDto
+
+| Field | Type |
+| --- | --- |
+| `id` | uuid |
+| `farmId` | uuid |
+| `categoryId` | uuid |
+| `name` | string |
+| `species` | string |
+| `breed` | string? |
+| `ageMonths` | integer? |
+| `gender` | string? |
+| `isActive` | boolean |
+| `createdAt` | datetime |
+| `diseaseHistory` | string? |
+| `recentGestationDate` | datetime? |
+| `lastVeterinaryVisit` | datetime? |
+| `vaccinations` | string? |
+| `lastLactationDate` | datetime? |
+| `parentage` | string? |
+
+### FollowUpDto
+
+| Field | Type |
+| --- | --- |
+| `id` | uuid |
+| `incidentId` | uuid |
+| `farmerResponse` | integer |
+| `notes` | string? |
+| `recordedAt` | datetime |
+
+### IncidentActionDto
+
+| Field | Type |
+| --- | --- |
+| `id` | uuid |
+| `incidentId` | uuid |
+| `description` | string |
+| `priority` | string |
+| `status` | string |
+| `completedAt` | datetime? |
+| `completionNotes` | string? |
+
+`status` is `"Pending"` in the current API.
+
+### TreatmentPlanDto
+
+| Field | Type |
+| --- | --- |
+| `id` | uuid |
+| `vetRequestId` | uuid |
+| `authoredByVetId` | string |
+| `instructionsText` | string |
+| `language` | string? |
+
+### PreventionPlanDto
+
+| Field | Type |
+| --- | --- |
+| `id` | uuid |
+| `incidentId` | uuid |
+| `content` | string |
+| `generatedFromHistory` | boolean |
+
+### AuditEventDto
+
+| Field | Type |
+| --- | --- |
+| `id` | uuid |
+| `actorId` | string |
+| `eventType` | string |
+| `relatedRecordId` | uuid? |
+| `timestamp` | datetime |
+| `details` | string? |
+
+### PagedResult\<T\>
+
+| Field | Type |
+| --- | --- |
+| `items` | array |
+| `page` | integer |
+| `pageSize` | integer |
+| `totalCount` | integer |
+| `totalPages` | integer |
 
 ---
 
-## Error handling
+## End-to-end workflows
 
-Unhandled exceptions are converted to RFC 7807 `ProblemDetails`:
+### Farmer onboarding
 
-| Exception | Status |
-|---|---|
-| FluentValidation failure | `400` |
-| `ArgumentException` / `ArgumentOutOfRangeException` | `400` |
-| `UnauthorizedAccessException` | `403` |
-| `KeyNotFoundException` | `404` |
-| `InvalidOperationException` | `409` |
-| `DbUpdateException` | `409` |
-| `HttpRequestException` | `502` |
-| Anything else | `500` |
+1. `POST /api/auth/register`
+2. `POST /api/auth/login`
+3. `POST /api/farms`
+4. `POST /api/livestock/categories`
+5. `POST /api/livestock/records`
+6. `GET /api/farms/{farmId}/dashboard`
 
-Controllers that validate form fields directly return `{ "error": "..." }` with `400`.
-Provider failures in voice endpoints return `502` with a generic message; internal exception
-details are logged, not returned.
+### Observation to incident
+
+1. `POST /api/poultry/observations` or `POST /api/chat/observation`
+2. Confirm with the matching confirm endpoint.
+3. If severity is `High` or `Critical`, an incident is created automatically.
+4. Optionally call `POST /api/chat/observation/{id}/create-incident` to add another incident.
+5. `GET /api/incidents/{farmId}` to list incidents.
+6. `POST /api/incidents/{incidentId}/status` to acknowledge, monitor, require follow-up, resolve, or reopen.
+
+### Vet request and payment
+
+1. Farmer creates an incident.
+2. Farmer calls `POST /api/vet-coordination/incidents/{incidentId}/vet-request`.
+3. Farmer calls `POST /api/payments/initiate` with the request's `farmerCost`.
+4. Farmer completes checkout (`checkoutUrl`) or, in simulated mode, uses the returned reference.
+5. Client calls `POST /api/payments/record` with the **total amount**.
+6. Flutterwave may also call `POST /api/payments/webhook`.
+7. Vet calls `POST /api/vet-coordination/vet-requests/{vetRequestId}/respond`.
+8. Vet (or farmer) creates a treatment plan with `POST /api/treatment-plans`.
+
+### Vet payout setup
+
+1. Admin registers the vet with `POST /api/admin/vets`.
+2. Vet logs in and calls `PUT /api/vet/me/payout-account`.
+3. Future payments to requests assigned to that vet include a Flutterwave split.
 
 ---
 
 ## Configuration
 
-| Key | Purpose |
-|---|---|
-| `ConnectionStrings:DefaultConnection` | PostgreSQL connection string |
-| `Jwt:SecretKey` | HS256 signing key, at least 32 bytes (required) |
-| `Jwt:Issuer` / `Jwt:Audience` | Token validation, defaults `FarmHand` / `FarmHandUsers` |
-| `Jwt:ExpirationMinutes` | Token lifetime, default `60` |
-| `Database:MigrateOnStartup` | Apply migrations outside Development |
-| `Seed:Password` | Development demo password; placeholder values refuse to seed |
-| `Seed:AdminEmail` / `Seed:FarmerEmail` / `Seed:VetEmail` | Demo account emails |
-| `Gemini:ApiKey` / `Groq:ApiKey` | Observation extraction and vision |
-| `YarnGpt:ApiKey` | Speech-to-text, text-to-speech, voices |
-| `Cloudinary:CloudName` / `ApiKey` / `ApiSecret` | Image uploads |
-| `Flutterwave:Mode` | `Simulated` (default) or `Live` |
-| `Flutterwave:SecretKey` / `PublicKey` / `SigningSecret` | Flutterwave payment integration |
-| `Flutterwave:BaseUrl` | API base URL, defaults `https://api.flutterwave.com/v3` |
-| `Flutterwave:RedirectUrl` | URL Flutterwave redirects to after payment |
-| `Flutterwave:WebhookSecretHash` | Secret hash used to verify incoming webhook signatures |
+Configuration is read from `appsettings.json`, environment variables, or user secrets. The tracked reference file is `src/FarmHand.API/appsettings.example.json`.
+
+| Key | Purpose | Notes |
+| --- | --- | --- |
+| `ConnectionStrings:DefaultConnection` | PostgreSQL connection | Required. |
+| `Jwt:SecretKey` | JWT signing key | Required, at least 32 bytes, must not contain `CHANGE_ME`. The app fails to start otherwise. |
+| `Jwt:Issuer` | JWT issuer | Defaults to `FarmHand`. |
+| `Jwt:Audience` | JWT audience | Defaults to `FarmHandUsers`. |
+| `Jwt:ExpirationMinutes` | Access-token lifetime | `60` in the example. |
+| `Flutterwave:Mode` | `Live` or any other value | Any value other than `Live` uses the simulated payment provider. |
+| `Flutterwave:SecretKey` | Flutterwave API secret | Required in live mode. |
+| `Flutterwave:PublicKey` | Flutterwave public key | Stored for provider use. |
+| `Flutterwave:SigningSecret` | Local payment-reference signing | Falls back to `Jwt:SecretKey` when absent. |
+| `Flutterwave:WebhookSecretHash` | Webhook signature secret | Required for webhook verification; without it the webhook returns `503`. |
+| `Flutterwave:BaseUrl` | Flutterwave API base | Defaults to `https://api.flutterwave.com/v3`. |
+| `Flutterwave:RedirectUrl` | Checkout return URL | Sent to Flutterwave. |
+| `Brevo:Enabled` | Enable email delivery | Must be `true` for credential emails. |
+| `Brevo:ApiKey` | Brevo API key | Required when enabled. |
+| `Brevo:BaseUrl` | Brevo API base | Defaults to `https://api.brevo.com/v3`. |
+| `Brevo:FromAddress` | Sender address | Required when enabled; must be verified in Brevo. |
+| `Brevo:FromName` | Sender display name | Example: `FarmHand`. |
+| `Gemini:ApiKey` | Gemini API key | Used for extraction and severity assessment. |
+| `Groq:ApiKey` | Groq API key | Used for extraction fallback and vision analysis. |
+| `YarnGpt:ApiKey` | YarnGPT API key | Used for speech-to-text, text-to-speech, and voices. |
+| `Cloudinary:CloudName` | Cloudinary cloud name | Used for observation images. |
+| `Cloudinary:ApiKey` | Cloudinary API key | Required for uploads. |
+| `Cloudinary:ApiSecret` | Cloudinary API secret | Required for uploads. |
+| `Database:MigrateOnStartup` | Run EF migrations on boot | Development always migrates and seeds. Production migrates only when `true`. |
+| `Seed:Password` | Demo password | Used by the Development seeder. |
+| `Seed:AdminEmail` | Demo admin email | Defaults to `admin@farmhand.ai`. |
+| `Seed:FarmerEmail` | Demo farmer email | Defaults to `farmer@farmhand.ai`. |
+| `Seed:VetEmail` | Demo vet email | Defaults to `vet@farmhand.ai`. |
+| `AllowedHosts` | ASP.NET host filtering | `*` in the example. |
+
+### Development seed accounts
+
+When `ASPNETCORE_ENVIRONMENT=Development`, startup migrates the database and seeds demo users using `Seed:Password`:
+
+| Role | Email |
+| --- | --- |
+| Admin | `admin@farmhand.ai` |
+| Farmer | `farmer@farmhand.ai` |
+| Vet | `vet@farmhand.ai` |
+
+Do not use the demo password in production.
+
+### Email delivery
+
+Brevo is used for vet credential emails:
+
+- If `Brevo:Enabled` is `false`, admin vet registration requires a `temporaryPassword` and reset-credentials returns `400`.
+- If delivery fails after account creation, the account exists but the password may be unknown; use reset-credentials once email works.
+- Emails are HTML with a plain-text alternative.
+- Sender address must be verified by Brevo.
 
 ---
+
+## Production checklist
+
+- Set a strong `Jwt:SecretKey` (32+ random bytes). The app refuses to start otherwise.
+- Set `Flutterwave:Mode` to `Live` and provide live `SecretKey`, `PublicKey`, `SigningSecret`, `WebhookSecretHash`, `BaseUrl`, and `RedirectUrl`.
+- Register the webhook URL with Flutterwave and configure the same secret hash.
+- Set `Brevo:Enabled=true`, a valid API key, and a verified `FromAddress`.
+- Set AI and Cloudinary credentials.
+- Decide whether `Database:MigrateOnStartup` should run in production. Development always migrates and seeds.
+- Serve over HTTPS; the app calls `UseHttpsRedirection`.
+- Configure CORS at the host/proxy level if the frontend is on another origin. The app has no CORS policy.
+- Swagger is only enabled in Development.
+- Back up the database before applying migrations.
+
+---
+
 ## Known limitations
 
-- `CaseFileDto` exists but is not exposed by a dedicated endpoint.
-- The baseline migration assumes a pre-existing schema; `AdoptBaselineMigrationAsync` records
-  the baseline when the database already contains the application tables.
+These are current implementation constraints, not frontend bugs.
+
+1. **Login does not return a refresh token.** `POST /api/auth/refresh` requires a refresh token, but login does not create one. Clients cannot use refresh after a normal login and should re-authenticate when the 60-minute access token expires.
+2. **`POST /api/auth/revoke` does not invalidate the current access token.** It revokes refresh tokens only. Use change-password to invalidate all JWTs, or wait for expiry.
+3. **No vet-request completion endpoint.** `VetRequest.Complete()` exists, but no API calls it, so `RequestStatus.Completed` is unreachable through HTTP.
+4. **No observation read endpoints.** Observations can be created and confirmed, but not listed or fetched.
+5. **No payment read endpoints.** Payments can be initiated and recorded, but not listed.
+6. **No treatment-plan list endpoint.** Only create and get-by-id are exposed.
+7. **No incident-action completion endpoint.** Actions are created and listed, but remain `Pending`.
+8. **No vet-request list endpoint.** Vet requests appear only in the dashboard.
+9. **Audit events are not protected.** Any authenticated user can create and read audit events, and `actorId` is client-supplied and not checked against the JWT.
+10. **Payout account numbers are stored unencrypted.** They are masked in API responses, but not encrypted at rest.
+11. **`MustChangePassword` is not enforced.** Temporary vet passwords work until the vet changes them.
+12. **Treatment-plan authorship is not verified.** `authoredByVetId` is a free-text string supplied by the caller.
+13. **No CORS policy.** Cross-origin browser clients will fail unless CORS is added or the SPA is served from the same origin.
+14. **Simulated payments do not move money.** `checkoutUrl` is `null`, and locally signed references are accepted by `/api/payments/record`.
+15. **Vets have narrow access.** Most farm-scoped endpoints return `403` for vets; only assigned vet requests, related incidents, prevention plans, treatment plans, and payments are accessible.
+16. **The dashboard DTO comment is stale.** `DashboardDto.VetRequests` is documented in code as “always empty”, but the handler populates it.
+17. **No automated tests.** Verification is currently limited to builds and manual smoke tests.
+18. **`POST /api/poultry/observations` binds internal pre-extraction fields.** `preExtracted` and `preAnalyzedVisionJson` are accepted by the public command model even though they are meant for internal callers.
