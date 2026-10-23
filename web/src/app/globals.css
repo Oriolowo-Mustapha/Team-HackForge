@@ -1,0 +1,139 @@
+@import "tailwindcss";
+
+/*
+ * FarmHand design tokens.
+ * Base palette from the brief (#EEEAE1 cream, #0B0B06 ink, #D1C1A7 beige, #655841 brown,
+ * #C15935 terracotta, #AE9A63 olive, #678535 green, #A18F84 taupe). Darker "-ink" shades are
+ * used wherever a colour carries text so every text pairing meets WCAG AA on cream and paper.
+ */
+@theme {
+  --font-sans: "Plus Jakarta Sans Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+
+  --color-cream: #eeeae1;
+  --color-paper: #fbf9f4;
+  --color-sand: #f4f0e8;
+  --color-line: #e2dbcd;
+  --color-beige: #d1c1a7;
+  --color-ink: #0b0b06;
+  --color-ink-2: #23211a;
+  --color-ink-3: #3a372d;
+  --color-muted: #655841;
+  --color-faint: #6f6058;
+  --color-taupe: #a18f84;
+
+  --color-terracotta: #c15935;
+  --color-terracotta-ink: #a8492a;
+  --color-terracotta-soft: #f3dfd3;
+  --color-terracotta-deep: #923e22;
+  --color-olive: #ae9a63;
+  --color-olive-ink: #6b5c30;
+  --color-olive-soft: #efe7d2;
+  --color-green: #678535;
+  --color-green-ink: #4f6b26;
+  --color-green-soft: #e2e9d2;
+  --color-red: #b23a2a;
+  --color-red-ink: #8f2a1b;
+  --color-red-soft: #f4d9d2;
+
+  --radius-xs: 8px;
+  --radius-sm: 12px;
+  --radius-md: 16px;
+  --radius-lg: 20px;
+  --radius-xl: 24px;
+  --radius-2xl: 32px;
+
+  --shadow-soft: 0 1px 2px rgb(11 11 6 / 0.04), 0 10px 30px -18px rgb(11 11 6 / 0.25);
+  --shadow-lift: 0 2px 4px rgb(11 11 6 / 0.05), 0 18px 40px -20px rgb(11 11 6 / 0.35);
+  --shadow-nav: 0 -10px 40px -12px rgb(11 11 6 / 0.35);
+
+  --ease-out-soft: cubic-bezier(0.22, 1, 0.36, 1);
+
+  --animate-scan-line: scan-line 2.4s var(--ease-out-soft) infinite;
+  --animate-pulse-ring: pulse-ring 1.6s ease-out infinite;
+  --animate-fade-up: fade-up 0.4s var(--ease-out-soft) both;
+  --animate-shimmer: shimmer 1.4s linear infinite;
+}
+
+@keyframes scan-line {
+  0% { top: 0%; opacity: 0; }
+  10% { opacity: 1; }
+  90% { opacity: 1; }
+  100% { top: calc(100% - 2px); opacity: 0; }
+}
+@keyframes pulse-ring {
+  0% { transform: scale(0.9); opacity: 0.7; }
+  100% { transform: scale(1.6); opacity: 0; }
+}
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes shimmer {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    background: var(--color-cream);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-feature-settings: "ss01", "cv11";
+    min-height: 100dvh;
+  }
+
+  ::selection {
+    background: var(--color-beige);
+    color: var(--color-ink);
+  }
+
+  :focus-visible {
+    outline: 2.5px solid var(--color-terracotta-ink);
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+
+  button, [role="button"], a {
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  input, textarea, select {
+    font: inherit;
+  }
+
+  h1, h2, h3 {
+    letter-spacing: -0.02em;
+  }
+}
+
+@layer utilities {
+  .pb-safe { padding-bottom: env(safe-area-inset-bottom); }
+  .pt-safe { padding-top: env(safe-area-inset-top); }
+  .mb-safe { margin-bottom: env(safe-area-inset-bottom); }
+  .tabular { font-variant-numeric: tabular-nums; }
+  .text-balance { text-wrap: balance; }
+  .text-pretty { text-wrap: pretty; }
+  .scrollbar-none { scrollbar-width: none; }
+  .scrollbar-none::-webkit-scrollbar { display: none; }
+  .skeleton {
+    background: linear-gradient(90deg, var(--color-sand) 0%, #ebe5d9 50%, var(--color-sand) 100%);
+    background-size: 200% 100%;
+    animation: var(--animate-shimmer);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}

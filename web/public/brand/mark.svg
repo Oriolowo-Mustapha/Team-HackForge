@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="FarmHand">
+  <rect width="512" height="512" rx="120" fill="#0B0B06"/>
+  <path d="M128 384C124 236 220 136 386 124C396 290 300 390 128 384Z" fill="#EEEAE1"/>
+  <g transform="translate(257 254) rotate(-45)">
+    <polyline points="-150,0 -46,0 -24,-52 6,58 30,-22 48,0 104,0" fill="none" stroke="#0B0B06" stroke-width="22" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="136" cy="0" r="19" fill="#C15935"/>
+  </g>
+</svg>
