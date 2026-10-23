@@ -25,6 +25,9 @@ public class VetRequest : BaseEntity
 
     public void Respond(Guid? vetPartnerId = null)
     {
+        if (Status != RequestStatus.Pending)
+            throw new InvalidOperationException("This vet request has already been assigned to a vet.");
+
         Status = RequestStatus.Responded;
         VetPartnerId = vetPartnerId;
         RespondedAt = DateTime.UtcNow;

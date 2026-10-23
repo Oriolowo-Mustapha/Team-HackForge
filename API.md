@@ -437,11 +437,12 @@ Other list endpoints return a plain JSON array.
 
 ### RequestType
 
-| Value | Name |
-| --- | --- |
-| `0` | `RemoteReview` |
-| `1` | `SharedVisit` |
-| `2` | `CooperativePlan` |
+| Value | Name | Meaning |
+| --- | --- | --- |
+| `0` | `RemoteReview` | Chat/photo teleconsult; no animal movement. |
+| `1` | `SharedVisit` | Vet travels to the farm; travel is priced into `farmerCost`. |
+| `2` | `CooperativePlan` | Cost shared among cooperative members; contributions tracked as cost shares. |
+| `3` | `ClinicVisit` | Farmer transports the affected animal to the vet. |
 
 ### RequestStatus
 
@@ -544,6 +545,8 @@ The API exposes 49 operations: 48 under `/api` plus `/health`.
 | `POST` | `/api/vet-coordination/incidents/{incidentId}/vet-request` | Bearer | Create a vet request. |
 | `POST` | `/api/vet-coordination/vet-requests/{vetRequestId}/respond` | Vet/Admin | Accept a vet request. |
 | `POST` | `/api/vet-coordination/vet-requests/{vetRequestId}/cost-share` | Bearer | Record a cost-share contribution. |
+| `GET` | `/api/vet-coordination/vet-requests/{vetRequestId}/cost-shares` | Bearer | Get the cost-share ledger for a vet request. |
+| `GET` | `/api/vet-coordination/vets` | Bearer | Farmer-facing directory of active vets. |
 | `POST` | `/api/vet-coordination/incidents/{incidentId}/prevention-plan` | Bearer | Create a prevention plan. |
 | `GET` | `/api/vet-coordination/incidents/{incidentId}/prevention-plan` | Bearer | Get a prevention plan. |
 | `POST` | `/api/treatment-plans` | Bearer | Create a treatment plan. |
@@ -1888,15 +1891,24 @@ The exact list depends on the YarnGPT provider.
 ### `POST /api/vet-coordination/incidents/{incidentId}/vet-request`
 
 Creates a vet request for an incident. The route `incidentId` must equal the body `incidentId`.
+Use `GET /api/vet-coordination/vets` to discover active vets and their ids.
+
+After creation, vets are notified by email (best effort): a targeted request (`vetPartnerId` set)
+informs only that vet; an untargeted request broadcasts to every active vet. Email failure never
+blocks request creation.
+
+The farm owner (or any user with access to the incident) initiates the request — including
+`SharedVisit` and `CooperativePlan` flows. Other cooperative members' contributions are recorded
+through cost shares; the Flutterwave payment itself is completed by one payer in full.
 
 **Body**
 
 | Field | Type | Required | Rules |
 | --- | --- | --- | --- |
 | `incidentId` | uuid | Yes | Must match the route. |
-| `requestType` | integer | Yes | `RequestType` 0–2. |
+| `requestType` | integer | Yes | `RequestType` 0–3. |
 | `farmerCost` | decimal | Yes | 0 or greater, in NGN. |
-| `vetPartnerId` | uuid | No | If supplied, the vet must exist and be active. |
+| `vetPartnerId` | uuid | No | If supplied, the vet must exist and be active. When omitted the request is broadcast to all active vets, and the first vet to respond claims it. |
 
 ```json
 {
@@ -1952,9 +1964,68 @@ Before responding, the request must have a `Completed` payment when `farmerCost 
 | `400` | Route/body mismatch or validation failed. |
 | `403` | Not a vet/admin, no active vet profile, or request assigned to another vet. |
 | `404` | Vet request not found. |
-| `409` | Payment is required but not completed. |
+| `409` | Payment is required but not completed, or the request was already assigned/responded to by another vet. |
 
-Unassigned requests may be answered by any active vet. Once assigned, only that vet or an admin may respond.
+Unassigned requests may be answered by any active vet; the first vet to respond is assigned to the
+request (`vetPartnerId` set, status `Responded`). Later vets receive `409`. Once assigned, only that
+vet or an admin may respond.
+
+---
+
+### `GET /api/vet-coordination/vet-requests/{vetRequestId}/cost-shares`
+
+Returns the cost-share ledger for a vet request: individual contributions, their running total,
+and the farmer cost target. Requires access to the vet request.
+
+**Response: `200 OK`**
+
+```json
+{
+  "vetRequestId": "3b7a...",
+  "items": [
+    { "id": "0c9f...", "payerType": "coop", "amount": 15000, "committedAt": "2026-10-23T09:12:00Z" }
+  ],
+  "totalAmount": 15000,
+  "targetAmount": 25000
+}
+```
+
+**Errors**
+
+| Status | Reason |
+| --- | --- |
+| `403` | Caller cannot access the vet request. |
+| `404` | Vet request not found. |
+
+---
+
+### `GET /api/vet-coordination/vets`
+
+Farmer-facing directory of active vets. Optional `?q=` filters by name or specialization
+(case-insensitive). Items include each vet's `id` for use as `vetPartnerId` on vet requests,
+plus `hasPayoutAccount` to indicate successful consultancy payouts.
+
+**Response: `200 OK`**
+
+```json
+{
+  "items": [
+    {
+      "id": "4a2d...",
+      "name": "Dr. Ada Obi",
+      "specialization": "Poultry",
+      "contact": "+234...",
+      "hasPayoutAccount": true
+    }
+  ]
+}
+```
+
+**Errors**
+
+| Status | Reason |
+| --- | --- |
+| `401` | Missing or invalid bearer token. |
 
 ---
 

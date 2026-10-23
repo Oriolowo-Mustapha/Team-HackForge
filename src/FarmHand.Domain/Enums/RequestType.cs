@@ -4,5 +4,6 @@ public enum RequestType
 {
     RemoteReview,
     SharedVisit,
-    CooperativePlan
+    CooperativePlan,
+    ClinicVisit
 }

@@ -1,4 +1,5 @@
 using FarmHand.Application.Features.VetCoordination;
+using FarmHand.Domain.Interfaces;
 using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -17,10 +18,50 @@ namespace FarmHand.API.Controllers;
 public class VetCoordinationController : ControllerBase
 {
     private readonly IMediator _mediator;
+    private readonly IVetPartnerRepository _vetPartnerRepository;
 
-    public VetCoordinationController(IMediator mediator)
+    public VetCoordinationController(IMediator mediator, IVetPartnerRepository vetPartnerRepository)
     {
         _mediator = mediator;
+        _vetPartnerRepository = vetPartnerRepository;
+    }
+
+    /// <summary>List active vets that farmers can address requests to.</summary>
+    /// <param name="q">Optional filter on name or specialization.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <response code="200">Active vet directory; contains each vet's id for request targeting.</response>
+    /// <response code="401">Missing or invalid bearer token.</response>
+    [HttpGet("vets")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    public async Task<IActionResult> ListAvailableVets([FromQuery] string? q, CancellationToken ct = default)
+    {
+        var vets = (await _vetPartnerRepository.GetAllAsync(ct))
+            .Where(v => v.IsActive)
+            .ToList();
+
+        if (!string.IsNullOrWhiteSpace(q))
+        {
+            var needle = q.Trim().ToLowerInvariant();
+            vets = vets
+                .Where(v => v.Name.ToLowerInvariant().Contains(needle)
+                    || v.Specialization.ToLowerInvariant().Contains(needle))
+                .ToList();
+        }
+
+        return Ok(new
+        {
+            items = vets
+                .OrderBy(v => v.Name)
+                .Select(v => new
+                {
+                    v.Id,
+                    v.Name,
+                    v.Specialization,
+                    v.Contact,
+                    v.HasPayoutAccount
+                })
+        });
     }
 
     /// <summary>Create a vet request for an incident.</summary>
@@ -77,6 +118,24 @@ public class VetCoordinationController : ControllerBase
         if (vetRequestId != command.VetRequestId) return BadRequest();
         await _mediator.Send(command, ct);
         return Ok();
+    }
+
+    /// <summary>Get the cost-share contributions recorded for a vet request.</summary>
+    /// <param name="vetRequestId">Vet request id; must be accessible to the caller.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <response code="200">Contribution ledger: items, running total, and the farmer cost target.</response>
+    /// <response code="401">Missing or invalid bearer token.</response>
+    /// <response code="403">The vet request belongs to another farm.</response>
+    /// <response code="404">Vet request not found.</response>
+    [HttpGet("vet-requests/{vetRequestId}/cost-shares")]
+    [ProducesResponseType(typeof(CostShareListDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetCostShares(Guid vetRequestId, CancellationToken ct)
+    {
+        var ledger = await _mediator.Send(new GetCostSharesQuery(vetRequestId), ct);
+        return Ok(ledger);
     }
 
     /// <summary>Create a prevention plan for an incident.</summary>
