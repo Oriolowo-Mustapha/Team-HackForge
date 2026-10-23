@@ -71,6 +71,12 @@ export const farmSummarySchema = z.object({
   flockHeadcount: z.number(),
   openIncidentCount: z.number(),
   pendingObservationCount: z.number(),
+  latitude: z.number().nullable().optional(),
+  longitude: z.number().nullable().optional(),
+  cityOrTown: nullableString,
+  state: nullableString,
+  country: nullableString,
+  locationSource: nullableString,
 });
 export type FarmSummary = z.infer<typeof farmSummarySchema>;
 
@@ -341,7 +347,19 @@ export const animalDetailSchema = z.object({
 });
 
 export const dashboardSchema = z.object({
-  farm: z.object({ id, ownerId: z.string(), displayName: z.string(), location: z.string(), createdAt: date }),
+  farm: z.object({
+    id,
+    ownerId: z.string(),
+    displayName: z.string(),
+    location: z.string(),
+    createdAt: date,
+    latitude: z.number().nullable().optional(),
+    longitude: z.number().nullable().optional(),
+    cityOrTown: nullableString,
+    state: nullableString,
+    country: nullableString,
+    locationSource: nullableString,
+  }),
   counts: z.object({
     animals: z.number(),
     flockHeadcount: z.number(),

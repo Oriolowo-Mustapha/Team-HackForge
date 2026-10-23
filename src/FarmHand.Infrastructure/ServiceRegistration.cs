@@ -56,6 +56,7 @@ public static class ServiceRegistration
             .AddResilienceHandler("gemini", builder => ConfigureAiPipeline(builder));
         services.AddHttpClient<IGroqAiClient, GroqAiClient>()
             .AddResilienceHandler("groq", builder => ConfigureAiPipeline(builder));
+        services.AddHttpClient<SpitchService>(client => client.Timeout = TimeSpan.FromSeconds(60));
         services.AddHttpClient<YarnGptService>(client => client.Timeout = TimeSpan.FromSeconds(75));
         services.AddScoped<IFarmAiService, FarmAiService>();
         services.AddScoped<IVisionAnalysisService, VisionAnalysisService>();

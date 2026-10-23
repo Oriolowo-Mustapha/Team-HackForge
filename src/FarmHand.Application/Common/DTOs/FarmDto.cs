@@ -11,4 +11,10 @@ public record FarmDto(
     string OwnerId,
     string DisplayName,
     string Location,
-    DateTime CreatedAt);
+    DateTime CreatedAt,
+    double? Latitude = null,
+    double? Longitude = null,
+    string? CityOrTown = null,
+    string? State = null,
+    string? Country = null,
+    string? LocationSource = null);

@@ -37,12 +37,28 @@ export const systemApi = {
   info: () => api("system/info", { schema: s.systemInfoSchema, quiet401: true }),
 };
 
+export type FarmLocationInput = {
+  displayName: string;
+  location: string;
+  latitude?: number | null;
+  longitude?: number | null;
+  cityOrTown?: string | null;
+  state?: string | null;
+  country?: string | null;
+  locationSource?: "device_gps" | "manual" | string | null;
+};
+
 export const farmsApi = {
   list: () => api("farms", { schema: z.array(s.farmSummarySchema) }),
   get: (farmId: string) => api(`farms/${farmId}`, { schema: s.farmSummarySchema }),
-  create: (displayName: string, location: string) => api("farms", { body: { displayName, location }, schema: s.idResponseSchema }),
-  update: (farmId: string, displayName: string, location: string) =>
-    api(`farms/${farmId}`, { method: "PUT", body: { displayName, location }, schema: s.farmSummarySchema }),
+  create: (input: string | FarmLocationInput, location?: string) => {
+    const body = typeof input === "string" ? { displayName: input, location: location ?? "" } : input;
+    return api("farms", { body, schema: s.idResponseSchema });
+  },
+  update: (farmId: string, input: string | FarmLocationInput, location?: string) => {
+    const body = typeof input === "string" ? { displayName: input, location: location ?? "" } : input;
+    return api(`farms/${farmId}`, { method: "PUT", body, schema: s.farmSummarySchema });
+  },
   overview: (farmId: string, signal?: AbortSignal) => api(`farms/${farmId}/overview`, { schema: s.dashboardSchema, signal }),
 };
 

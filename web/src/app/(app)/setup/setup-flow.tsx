@@ -1,7 +1,7 @@
 "use client";
 
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Check, X } from "lucide-react";
+import { ArrowLeft, Check, Loader2, MapPin, Navigation, RotateCcw, X } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -15,6 +15,7 @@ import { qk } from "@/lib/queries";
 import { BrandMark } from "@/components/shell/brand";
 import { Button } from "@/components/ui/button";
 import { ChoiceChips, Field, Input } from "@/components/ui/field";
+import { Segmented } from "@/components/ui/segmented";
 import { InlineError } from "@/components/ui/states";
 
 export const SPECIES_OPTIONS = [
@@ -26,6 +27,14 @@ export const SPECIES_OPTIONS = [
   { value: "Pig", label: "Pigs", group: "Pig pen" },
 ] as const;
 
+export const NIGERIAN_STATES = [
+  "Abia", "Adamawa", "Akwa Ibom", "Anambra", "Bauchi", "Bayelsa", "Benue", "Borno",
+  "Cross River", "Delta", "Ebonyi", "Edo", "Ekiti", "Enugu", "FCT - Abuja", "Gombe",
+  "Imo", "Jigawa", "Kaduna", "Kano", "Katsina", "Kebbi", "Kogi", "Kwara", "Lagos",
+  "Nasarawa", "Niger", "Ogun", "Ondo", "Osun", "Oyo", "Plateau", "Rivers", "Sokoto",
+  "Taraba", "Yobe", "Zamfara"
+] as const;
+
 export function SetupFlow({ another }: { another: boolean }) {
   const router = useRouter();
   const client = useQueryClient();
@@ -33,23 +42,125 @@ export function SetupFlow({ another }: { another: boolean }) {
   const { setFarm } = useActiveFarm();
   const [step, setStep] = useState<1 | 2>(1);
   const [farmId, setFarmId] = useState<string | null>(null);
-  const [farm, setFarmForm] = useState({ name: "", location: "" });
+  const [locationMode, setLocationMode] = useState<"gps" | "manual">("gps");
+  const [locating, setLocating] = useState(false);
+  const [geoError, setGeoError] = useState<string | null>(null);
+  const [farm, setFarmForm] = useState<{
+    name: string;
+    location: string;
+    cityOrTown: string;
+    state: string;
+    country: string;
+    latitude: number | null;
+    longitude: number | null;
+    locationSource: string;
+  }>({
+    name: "",
+    location: "",
+    cityOrTown: "",
+    state: "",
+    country: "Nigeria",
+    latitude: null,
+    longitude: null,
+    locationSource: "device_gps",
+  });
   const [group, setGroup] = useState({ species: "" as string, name: "", headcount: "" });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [error, setError] = useState<unknown>(null);
   const [pending, setPending] = useState(false);
 
+  function detectGpsLocation() {
+    if (typeof window === "undefined" || !("geolocation" in navigator)) {
+      setGeoError("Geolocation is not supported by your browser. Please enter your location manually.");
+      setLocationMode("manual");
+      return;
+    }
+    setLocating(true);
+    setGeoError(null);
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        const lat = pos.coords.latitude;
+        const lon = pos.coords.longitude;
+        try {
+          const res = await fetch(
+            `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=14&addressdetails=1`,
+            { headers: { "Accept-Language": "en" } }
+          );
+          if (!res.ok) throw new Error("Reverse geocode request failed");
+          const data = await res.json();
+          const addr = data.address || {};
+          const cityOrTown = addr.town || addr.city || addr.suburb || addr.village || addr.county || "";
+          const state = addr.state || "";
+          const country = addr.country || "Nigeria";
+          const formatted = [cityOrTown, state, country].filter(Boolean).join(", ") || data.display_name || `${lat.toFixed(4)}, ${lon.toFixed(4)}`;
+
+          setFarmForm((prev) => ({
+            ...prev,
+            location: formatted,
+            cityOrTown,
+            state,
+            country,
+            latitude: lat,
+            longitude: lon,
+            locationSource: "device_gps",
+          }));
+        } catch {
+          const fallback = `${lat.toFixed(4)}, ${lon.toFixed(4)}`;
+          setFarmForm((prev) => ({
+            ...prev,
+            location: fallback,
+            latitude: lat,
+            longitude: lon,
+            locationSource: "device_gps",
+          }));
+        } finally {
+          setLocating(false);
+        }
+      },
+      (err) => {
+        setLocating(false);
+        if (err.code === 1) {
+          setGeoError("Location access was denied. You can enter your town and state manually below.");
+        } else {
+          setGeoError("GPS coordinates could not be retrieved. Please enter your location manually.");
+        }
+        setLocationMode("manual");
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
+    );
+  }
+
+  function handleManualChange(field: "cityOrTown" | "state" | "location", val: string) {
+    setFarmForm((prev) => {
+      const next = { ...prev, [field]: val, locationSource: "manual" };
+      if (field === "cityOrTown" || field === "state") {
+        const parts = [next.cityOrTown.trim(), next.state.trim(), next.country].filter(Boolean);
+        next.location = parts.join(", ");
+      }
+      return next;
+    });
+  }
+
   async function createFarm(event: FormEvent) {
     event.preventDefault();
     const found: Record<string, string> = {};
     if (farm.name.trim().length < 2) found.name = "Give your farm a name.";
-    if (farm.location.trim().length < 2) found.location = "Add a town, LGA or state so vets know where you are.";
+    if (farm.location.trim().length < 2) found.location = "Add a location or use GPS so vets know where you are.";
     setErrors(found);
     if (Object.keys(found).length) return;
     setPending(true);
     setError(null);
     try {
-      const { id } = await farmsApi.create(farm.name.trim(), farm.location.trim());
+      const { id } = await farmsApi.create({
+        displayName: farm.name.trim(),
+        location: farm.location.trim(),
+        latitude: farm.latitude,
+        longitude: farm.longitude,
+        cityOrTown: farm.cityOrTown || null,
+        state: farm.state || null,
+        country: farm.country || "Nigeria",
+        locationSource: farm.locationSource || (farm.latitude ? "device_gps" : "manual"),
+      });
       setFarmId(id);
       setFarm(id);
       setStep(2);
@@ -129,9 +240,114 @@ export function SetupFlow({ another }: { another: boolean }) {
               <Field label="Farm name" error={errors.name}>
                 <Input value={farm.name} onChange={(e) => setFarmForm((f) => ({ ...f, name: e.target.value }))} placeholder="Adeyemi Family Farm" autoComplete="organization" />
               </Field>
-              <Field label="Location" hint="Town and state, e.g. Ikorodu, Lagos" error={errors.location}>
-                <Input value={farm.location} onChange={(e) => setFarmForm((f) => ({ ...f, location: e.target.value }))} placeholder="Ikorodu, Lagos" autoComplete="address-level2" />
-              </Field>
+
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-semibold">Farm location</p>
+                  <span className="text-xs text-muted">Choose method</span>
+                </div>
+                <Segmented
+                  label="Location mode"
+                  value={locationMode}
+                  onChange={(m) => setLocationMode(m as "gps" | "manual")}
+                  options={[
+                    { value: "gps", label: "Auto-detect (GPS)" },
+                    { value: "manual", label: "Type manually" },
+                  ]}
+                />
+
+                {locationMode === "gps" ? (
+                  <div className="space-y-2">
+                    {farm.latitude && farm.longitude ? (
+                      <div className="rounded-2xl border border-green-ink/20 bg-green-ink/5 p-4 space-y-2">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex items-center gap-2 text-green-ink font-semibold text-sm">
+                            <MapPin className="size-4 shrink-0" />
+                            <span>GPS Location Locked</span>
+                          </div>
+                          <span className="inline-flex items-center rounded-full bg-green-ink/10 px-2.5 py-0.5 text-xs font-medium text-green-ink tabular">
+                            {farm.latitude.toFixed(4)}, {farm.longitude.toFixed(4)}
+                          </span>
+                        </div>
+                        <p className="text-sm font-medium text-ink leading-snug">{farm.location}</p>
+                        <div className="pt-1">
+                          <button
+                            type="button"
+                            onClick={detectGpsLocation}
+                            disabled={locating}
+                            className="inline-flex items-center gap-1.5 text-xs font-semibold text-muted hover:text-ink transition-colors"
+                          >
+                            <RotateCcw className="size-3" /> Re-detect location
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="rounded-2xl border border-line bg-paper p-5 text-center space-y-3">
+                        <div className="mx-auto flex size-11 items-center justify-center rounded-full bg-sand text-ink">
+                          {locating ? <Loader2 className="size-5 animate-spin" /> : <Navigation className="size-5" />}
+                        </div>
+                        <div>
+                          <p className="text-sm font-semibold">Get current device location</p>
+                          <p className="text-xs text-muted mt-0.5">Captures your precise coordinates and resolves your town and state automatically.</p>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="md"
+                          onClick={detectGpsLocation}
+                          loading={locating}
+                          icon={<MapPin className="size-4" />}
+                        >
+                          Detect My Location
+                        </Button>
+                      </div>
+                    )}
+                    {geoError && (
+                      <p role="alert" className="text-xs text-red-ink font-medium">
+                        {geoError}
+                      </p>
+                    )}
+                    {errors.location && (
+                      <p role="alert" className="text-xs text-red-ink font-medium">
+                        {errors.location}
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <Field label="Town or City / LGA" hint="e.g. Ikorodu, Epe, Ibadan, Zaria">
+                      <Input
+                        value={farm.cityOrTown}
+                        onChange={(e) => handleManualChange("cityOrTown", e.target.value)}
+                        placeholder="Ikorodu"
+                        autoComplete="address-level2"
+                      />
+                    </Field>
+                    <Field label="State" hint="Select your state">
+                      <div className="relative">
+                        <select
+                          value={farm.state}
+                          onChange={(e) => handleManualChange("state", e.target.value)}
+                          className="w-full h-12 rounded-2xl border border-line bg-paper px-4 text-sm font-medium text-ink focus:outline-none focus:ring-2 focus:ring-ink"
+                        >
+                          <option value="">Select state...</option>
+                          {NIGERIAN_STATES.map((s) => (
+                            <option key={s} value={s}>{s}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </Field>
+                    <Field label="Full Location Summary" hint="Formatted address stored in records" error={errors.location}>
+                      <Input
+                        value={farm.location}
+                        onChange={(e) => handleManualChange("location", e.target.value)}
+                        placeholder="Ikorodu, Lagos, Nigeria"
+                        autoComplete="address-level1"
+                      />
+                    </Field>
+                  </div>
+                )}
+              </div>
               <InlineError error={error} />
               <Button type="submit" size="lg" block loading={pending}>
                 Continue

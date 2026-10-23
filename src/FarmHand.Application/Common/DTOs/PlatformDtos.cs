@@ -12,7 +12,13 @@ public record FarmSummaryDto(
     int AnimalCount,
     int FlockHeadcount,
     int OpenIncidentCount,
-    int PendingObservationCount);
+    int PendingObservationCount,
+    double? Latitude = null,
+    double? Longitude = null,
+    string? CityOrTown = null,
+    string? State = null,
+    string? Country = null,
+    string? LocationSource = null);
 
 /// <summary>Livestock group (flock, herd or pen). <see cref="Headcount"/> is maintained by the farmer for flocks.</summary>
 public record LivestockCategoryDetailDto(

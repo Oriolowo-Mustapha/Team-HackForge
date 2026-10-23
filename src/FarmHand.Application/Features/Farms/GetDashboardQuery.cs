@@ -53,7 +53,8 @@ public class GetDashboardQueryHandler : IRequestHandler<GetDashboardQuery, Dashb
         );
 
         return new DashboardDto(
-            new FarmDto(farm.Id, farm.OwnerId, farm.DisplayName, farm.Location, farm.CreatedAt),
+            new FarmDto(farm.Id, farm.OwnerId, farm.DisplayName, farm.Location, farm.CreatedAt,
+                farm.Latitude, farm.Longitude, farm.CityOrTown, farm.State, farm.Country, farm.LocationSource),
             incidents,
             actionPlan,
             vetRequests);
