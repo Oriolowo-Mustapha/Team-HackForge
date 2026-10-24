@@ -17,6 +17,7 @@ import { InlineError, Notice } from "@/components/ui/states";
 const notices = {
   expired: { tone: "warning", text: "Your session ended. Sign in again. Saved drafts are private to the account that created them." },
   signedOut: { tone: "info", text: "You've signed out. Saved drafts are private to the account that created them." },
+  partialSignOut: { tone: "warning", text: "Signed out on this device. Sign-out on other devices could not be confirmed. Sign in and try Sign out everywhere again." },
   reset: { tone: "success", text: "Your password was reset. Sign in with your new password." },
   changed: { tone: "success", text: "Password changed. Sign in with your new password." },
 } as const;

@@ -7,7 +7,7 @@ export const metadata: Metadata = { title: "Sign in" };
 
 export default async function LoginPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const params = await searchParams;
-  const notice = params.expired ? "expired" : params.signedOut ? "signedOut" : params.reset ? "reset" : params.changed ? "changed" : null;
+  const notice = params.partialSignOut ? "partialSignOut" : params.expired ? "expired" : params.signedOut ? "signedOut" : params.reset ? "reset" : params.changed ? "changed" : null;
   return (
     <AuthFrame
       title="Welcome back"

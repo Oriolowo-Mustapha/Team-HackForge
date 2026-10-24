@@ -26,7 +26,7 @@ export const sessionApi = {
     }),
   register: (body: { email: string; password: string; fullName: string; phoneNumber?: string }) =>
     api<{ role: string }>("/api/session/register", { body, quiet401: true }),
-  logout: (everywhere = false) => api("/api/session/logout", { body: { everywhere }, quiet401: true }),
+  logout: (everywhere = false) => api<{ signedOut: boolean; everywhereSignedOut: boolean }>("/api/session/logout", { body: { everywhere }, quiet401: true }),
 };
 
 export const authApi = {

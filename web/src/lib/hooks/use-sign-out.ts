@@ -2,6 +2,7 @@
 
 import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useState } from "react";
+import { toast } from "sonner";
 import { sessionApi } from "@/lib/api/endpoints";
 import { clearLocalData } from "@/lib/drafts";
 
@@ -13,16 +14,20 @@ export function useSignOut() {
   const signOut = useCallback(
     async (everywhere = false) => {
       setPending(true);
+      let globallyConfirmed = false;
       try {
-        await sessionApi.logout(everywhere);
+        const result = await sessionApi.logout(everywhere);
+        globallyConfirmed = result.everywhereSignedOut;
       } catch {
-        // The BFF clears cookies even when the API is unreachable; local data is wiped regardless.
+        // Only a completed BFF response can clear HttpOnly cookies. A browser network failure cannot.
+        setPending(false);
+        toast.error("Sign-out could not finish. Reconnect and try again; this session is still active.");
+        return;
       }
       await clearLocalData();
       client.clear();
       // A full page load guarantees no signed-in client state survives sign-out.
-      // eslint-disable-next-line @next/next/no-location-assign-relative-destination
-      window.location.assign("/login?signedOut=1");
+      window.location.assign(everywhere && !globallyConfirmed ? "/login?partialSignOut=1" : "/login?signedOut=1");
     },
     [client],
   );

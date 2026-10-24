@@ -39,9 +39,15 @@ async function loginApi(
       origin: new URL(baseURL).origin,
     },
   });
-  const response = await context.post("/api/session/login", {
+  let response = await context.post("/api/session/login", {
     data: { email, password },
   });
+  if (response.status() === 429) {
+    // The suite creates real sessions and must respect the configured 20/IP/minute budget.
+    const retryAfter = Number(response.headers()["retry-after"] ?? "60");
+    await new Promise((resolve) => setTimeout(resolve, Math.min(60, Math.max(1, Number.isFinite(retryAfter) ? retryAfter : 60)) * 1000));
+    response = await context.post("/api/session/login", { data: { email, password } });
+  }
   expect(response.status(), await response.text()).toBe(200);
   const body = await response.json();
   expect(body).not.toHaveProperty("token");
@@ -744,5 +750,67 @@ test("another account cannot read drafts when device cleanup fails transiently",
     await page.goto("/scan?drafts=1");
     await expect(page.getByRole("dialog", { name: "Unsent reports", exact: true })).toContainText("No unsent reports");
     await expect(page.locator("body")).not.toContainText(privateNote);
+  } finally { await context.close(); await farmer.dispose(); }
+});
+
+test("offline sign-out reports an active session and reconnecting permits a real sign-out", async ({ playwright, browser }) => {
+  const farmer = await loginApi(playwright, "farmer@farmhand.ai");
+  const context = await browser.newContext({ baseURL, storageState: await farmer.storageState() });
+  try {
+    const page = await context.newPage();
+    await page.goto("/profile");
+    const signOut = page.getByRole("main").getByRole("button", { name: "Sign out", exact: true });
+    await expect(signOut).toBeVisible();
+    await context.setOffline(true);
+    await signOut.click();
+    await expect(page.getByText("Sign-out could not finish. Reconnect and try again; this session is still active.", { exact: true })).toBeVisible();
+    await expect(page).toHaveURL(/\/profile$/);
+    expect((await context.cookies()).some((cookie) => cookie.name === "fh_refresh")).toBe(true);
+    await context.setOffline(false);
+    await signOut.click();
+    await expect(page).toHaveURL(/\/login\?signedOut=1$/);
+    expect((await context.cookies()).filter((cookie) => cookie.name.startsWith("fh_"))).toHaveLength(0);
+  } finally { await context.setOffline(false); await context.close(); await farmer.dispose(); }
+});
+
+test("sign-out everywhere refreshes an expired access cookie and revokes a second session", async ({ playwright, browser }) => {
+  const farmer = await loginApi(playwright, "farmer@farmhand.ai");
+  const second = await loginApi(playwright, "farmer@farmhand.ai");
+  const context = await browser.newContext({ baseURL, storageState: await farmer.storageState() });
+  try {
+    const page = await context.newPage();
+    await page.goto("/profile");
+    await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+    // Expiring the access cookie models the browser's normal access-token expiration; refresh remains valid.
+    await context.addCookies([{ name: "fh_access", value: "expired", url: baseURL, expires: 1 }]);
+    expect((await context.cookies()).some((cookie) => cookie.name === "fh_access")).toBe(false);
+    const response = page.waitForResponse((item) => item.url().endsWith("/api/session/logout"));
+    await page.getByRole("main").getByRole("button", { name: "Sign out everywhere", exact: true }).click();
+    expect((await (await response).json()).everywhereSignedOut).toBe(true);
+    await expect(page).toHaveURL(/\/login\?signedOut=1$/);
+    expect((await context.cookies()).filter((cookie) => cookie.name.startsWith("fh_"))).toHaveLength(0);
+    expect((await (await second.get("/api/session")).json()).authenticated).toBe(false);
+  } finally { await context.close(); await farmer.dispose(); await second.dispose(); }
+});
+
+test("unconfirmed global revocation clears this device and shows a partial sign-out notice", async ({ playwright, browser }) => {
+  const farmer = await loginApi(playwright, "farmer@farmhand.ai");
+  const context = await browser.newContext({ baseURL, storageState: await farmer.storageState() });
+  try {
+    const page = await context.newPage();
+    await page.goto("/profile");
+    await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+    await context.addCookies([
+      { name: "fh_access", value: "expired-global-test", url: baseURL, httpOnly: true },
+      { name: "fh_refresh", value: "invalid-global-test", url: baseURL, httpOnly: true },
+    ]);
+    const response = page.waitForResponse((item) => item.url().endsWith("/api/session/logout"));
+    await page.getByRole("main").getByRole("button", { name: "Sign out everywhere", exact: true }).click();
+    expect((await (await response).json()).everywhereSignedOut).toBe(false);
+    await expect(page).toHaveURL(/\/login\?partialSignOut=1$/);
+    await expect(page.getByText(/Sign-out on other devices could not be confirmed/)).toBeVisible();
+    expect((await context.cookies()).filter((cookie) => cookie.name.startsWith("fh_"))).toHaveLength(0);
+    // No successful revoke occurred: the independent API session is still active.
+    expect((await (await farmer.get("/api/session")).json()).authenticated).toBe(true);
   } finally { await context.close(); await farmer.dispose(); }
 });
