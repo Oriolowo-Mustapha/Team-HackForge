@@ -217,10 +217,23 @@ test("permissions, CSRF, and complete clinical/payment lifecycle", async ({
         manualEntry: "true",
         mortalityCount: "3",
         idempotencyKey: crypto.randomUUID(),
+        image: {
+          name: "synthetic-test-icon.png",
+          mimeType: "image/png",
+          buffer: await (await farmer.get("/icons/favicon-32.png")).body(),
+        },
       },
     });
     expect(reportResponse.ok(), await reportResponse.text()).toBe(true);
     const report = await reportResponse.json();
+    expect(report.imageUrl).toMatch(/^\/api\/media\//);
+    const mediaPath = report.imageUrl.replace("/api/media/", "/api/bff/media/");
+    const ownerMedia = await farmer.get(mediaPath);
+    expect(ownerMedia.status()).toBe(200);
+    expect(ownerMedia.headers()["cache-control"]).toContain("no-store");
+    expect(ownerMedia.headers()["content-type"]).toContain("image/png");
+    expect((await other.get(mediaPath)).status()).toBe(404);
+    expect((await vet.get(mediaPath)).status()).toBe(404);
     const confirmation = await json(
       farmer,
       `observations/${report.id}/confirm`,
@@ -264,6 +277,7 @@ test("permissions, CSRF, and complete clinical/payment lifecycle", async ({
       ),
     ).toHaveLength(1);
     const acceptedVet = claims[0].ok() ? vet : secondVet;
+    expect((await acceptedVet.get(mediaPath)).status()).toBe(200);
     const assigned = await json(
       acceptedVet,
       `VetCoordination/vet-requests/${requestId}`,

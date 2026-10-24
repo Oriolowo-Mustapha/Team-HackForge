@@ -92,7 +92,6 @@ async function handle(request: Request, ctx: { params: Promise<{ path: string[] 
     const value = upstream.headers.get(name);
     if (value && name !== "cache-control") headers.set(name, value);
   }
-  if (joined.startsWith("media/") && upstream.ok) headers.set("cache-control", "private, max-age=86400");
 
   const response = new NextResponse(upstream.status === 204 ? null : upstream.body, { status: upstream.status, headers });
   if (rotated) writeSessionCookies(response.cookies, rotated);
