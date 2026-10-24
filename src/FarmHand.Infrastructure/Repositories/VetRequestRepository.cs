@@ -45,6 +45,14 @@ public class VetRequestRepository : EfRepository<VetRequest>, IVetRequestReposit
         join f in DbContext.Set<Farm>() on i.FarmId equals f.Id
         select new Row { V = v, I = i, F = f };
 
+    public async Task<IReadOnlyList<VetRequestRow>> GetActiveByFarmAsync(Guid farmId, CancellationToken ct = default)
+    {
+        var rows = await Rows().AsNoTracking().Where(r => r.F.Id == farmId
+            && (r.V.Status == Domain.Enums.RequestStatus.Pending || r.V.Status == Domain.Enums.RequestStatus.Responded))
+            .OrderByDescending(r => r.V.CreatedAt).ThenBy(r => r.V.Id).ToListAsync(ct);
+        return rows.Select(r => new VetRequestRow(r.V, r.I, r.F)).ToList();
+    }
+
     public async Task<PagedList<VetRequestRow>> SearchAsync(VetRequestSearch search, CancellationToken ct = default)
     {
         var query = Rows();
@@ -60,6 +68,7 @@ public class VetRequestRepository : EfRepository<VetRequest>, IVetRequestReposit
         var total = await query.CountAsync(ct);
         var items = await query
             .OrderByDescending(r => r.V.CreatedAt)
+            .ThenBy(r => r.V.Id)
             .Skip(search.Paging.Skip)
             .Take(search.Paging.PageSize)
             .AsNoTracking()

@@ -29,6 +29,10 @@ public class IncidentRepository : EfRepository<Incident>, IIncidentRepository
         var query = DbSet.AsNoTracking();
         if (search.FarmIds is not null) query = query.Where(i => search.FarmIds.Contains(i.FarmId));
         if (search.IncidentIds is not null) query = query.Where(i => search.IncidentIds.Contains(i.Id));
+        if (search.AssignedVetPartnerId is { } assignedVet)
+            query = query.Where(i => DbContext.VetRequests.Any(v => v.IncidentId == i.Id
+                && v.VetPartnerId == assignedVet
+                && (v.Status == Domain.Enums.RequestStatus.Responded || v.Status == Domain.Enums.RequestStatus.Completed)));
         if (search.Status is { } status) query = query.Where(i => i.Status == status);
         if (search.OpenOnly) query = query.Where(i => i.Status != Domain.Enums.IncidentStatus.Resolved);
         if (search.Severity is { } severity) query = query.Where(i => i.Severity == severity);
@@ -36,6 +40,7 @@ public class IncidentRepository : EfRepository<Incident>, IIncidentRepository
         if (search.CategoryId is { } categoryId) query = query.Where(i => i.LivestockCategoryId == categoryId);
         if (search.From is { } from) query = query.Where(i => i.DetectedAt >= from);
         if (search.To is { } to) query = query.Where(i => i.DetectedAt <= to);
+        if (search.ResolvedSince is { } resolvedSince) query = query.Where(i => i.ResolvedAt >= resolvedSince);
         if (!string.IsNullOrWhiteSpace(search.Text))
         {
             var pattern = $"%{search.Text.Trim()}%";
@@ -43,9 +48,12 @@ public class IncidentRepository : EfRepository<Incident>, IIncidentRepository
         }
 
         var total = await query.CountAsync(ct);
-        var items = await query
-            .OrderByDescending(i => i.Severity)
-            .ThenByDescending(i => i.DetectedAt)
+        var ordered = search.ResolvedSince is not null
+            ? query.OrderByDescending(i => i.ResolvedAt).ThenBy(i => i.Id)
+            : search.NewestFirst
+                ? query.OrderByDescending(i => i.DetectedAt).ThenBy(i => i.Id)
+                : query.OrderByDescending(i => i.Severity).ThenByDescending(i => i.DetectedAt).ThenBy(i => i.Id);
+        var items = await ordered
             .Skip(search.Paging.Skip)
             .Take(search.Paging.PageSize)
             .ToListAsync(ct);

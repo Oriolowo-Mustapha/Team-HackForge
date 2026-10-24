@@ -1,5 +1,8 @@
 using FarmHand.Domain.Interfaces;
 using FarmHand.Infrastructure.Persistence;
+using FarmHand.Application.Common.Exceptions;
+using Microsoft.EntityFrameworkCore;
+using Npgsql;
 
 namespace FarmHand.Infrastructure.Repositories;
 
@@ -51,7 +54,15 @@ public class UnitOfWork : IUnitOfWork
 
     public async Task<int> SaveChangesAsync(CancellationToken ct = default)
     {
-        return await _dbContext.SaveChangesAsync(ct);
+        try
+        {
+            return await _dbContext.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException ex) when (ex.InnerException is PostgresException
+            { SqlState: PostgresErrorCodes.UniqueViolation, ConstraintName: "IX_VetRequests_OneActivePerIncident" })
+        {
+            throw PublicException.Conflict("This case already has an active vet request. Refresh to view it.");
+        }
     }
 
     public void Dispose()

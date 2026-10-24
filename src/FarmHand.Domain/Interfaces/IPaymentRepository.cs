@@ -7,4 +7,5 @@ public interface IPaymentRepository : IRepository<Payment>
     Task<PagedList<PaymentRow>> SearchAsync(PaymentSearch search, CancellationToken ct = default);
     Task<Payment?> GetByProviderTransactionIdAsync(string providerTransactionId, CancellationToken ct = default);
     Task<IReadOnlyList<Payment>> GetByVetRequestIdsAsync(IEnumerable<Guid> vetRequestIds, CancellationToken ct = default);
+    Task<IReadOnlySet<Guid>> GetPaidRequestIdsAsync(IEnumerable<Guid> vetRequestIds, CancellationToken ct = default);
 }

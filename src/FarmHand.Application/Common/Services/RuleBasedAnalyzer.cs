@@ -28,7 +28,7 @@ public static partial class RuleBasedAnalyzer
     [
         ("Coughing", Rx(@"\bcough(s|ing|ed)?\b"), false),
         ("Sneezing", Rx(@"\bsneez(e|es|ing)\b"), false),
-        ("Laboured or noisy breathing", Rx(@"\b(gasp(s|ing)?|breathing (hard|heavily|difficult)|difficult(y)? breathing|wheez(e|ing)|rattl(e|ing))\b"), true),
+        ("Laboured or noisy breathing", Rx(@"\b(gasp(s|ing)?|breathing (hard|heavily|difficult(y)?)|difficult(y)? breathing|wheez(e|ing)|rattl(e|ing))\b"), true),
         ("Nasal or eye discharge", Rx(@"\b(discharge|runny nose|watery eyes?|mucus|snot)\b"), false),
         ("Abnormal droppings or diarrhoea", Rx(@"\b(diarrh(o)?ea|watery (droppings|poo|faeces|feces|stool)|green(ish)? (droppings|poo)|bloody (droppings|stool|poo)|loose (droppings|stool))\b"), false),
         ("Blood in droppings", Rx(@"\bbloody (droppings|stool|poo)|blood in (droppings|stool|poo)\b"), true),
@@ -45,7 +45,7 @@ public static partial class RuleBasedAnalyzer
         ("Skin lesions or sores", Rx(@"\b(sores?|lesions?|scabs?|wounds?|blisters?)\b"), false),
         ("Difficulty giving birth", Rx(@"\b(difficult (birth|kidding|lambing|calving)|stuck kid|dystocia)\b"), true),
         ("Udder problems", Rx(@"\b(mastitis|hard udder|swollen udder|bloody milk)\b"), false),
-        ("Sudden deaths", Rx(@"\b(sudden(ly)? (death|died|dead)|dropp(ed|ing) dead|died suddenly)\b"), true)
+        ("Sudden deaths", Rx(@"\b(sudden(ly)? (deaths?|died|dead)|dropp(ed|ing) dead|died suddenly)\b"), true)
     ];
 
     private static Regex Rx(string pattern) => new(pattern, RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.CultureInvariant);
@@ -103,8 +103,14 @@ public static partial class RuleBasedAnalyzer
     public static IReadOnlyList<(string Label, bool RedFlag)> DetectSymptoms(string? text)
     {
         if (string.IsNullOrWhiteSpace(text)) return [];
-        return SymptomRules.Where(r => r.Pattern.IsMatch(text)).Select(r => (r.Label, r.RedFlag)).ToList();
+        return SymptomRules.Where(r => r.Pattern.IsMatch(text) || text.Contains(r.Label, StringComparison.OrdinalIgnoreCase))
+            .Select(r => (r.Label, r.RedFlag)).ToList();
     }
+
+    public static IReadOnlyList<string> ApprovedSymptoms(IEnumerable<string>? values) =>
+        (values ?? []).Where(v => !string.IsNullOrWhiteSpace(v))
+            .SelectMany(v => DetectSymptoms(v).Select(s => s.Label))
+            .Distinct(StringComparer.OrdinalIgnoreCase).Take(12).ToList();
 
     public static int? ExtractMortality(string text)
     {
@@ -126,7 +132,9 @@ public static partial class RuleBasedAnalyzer
     /// </summary>
     public static AIAssessment Assess(AssessmentInput input, int? headcount = null)
     {
-        var combined = string.Join(". ", new[] { input.Transcript, input.FarmerNotes }.Where(s => !string.IsNullOrWhiteSpace(s)));
+        var vision = Mappers.ReadVision(input.VisionAnalysisJson);
+        var combined = string.Join(". ", new[] { input.Transcript, input.FarmerNotes,
+            vision is { Available: true } ? string.Join(". ", vision.DetectedIssues) : null }.Where(s => !string.IsNullOrWhiteSpace(s)));
         var symptoms = DetectSymptoms(combined);
         var redFlags = symptoms.Where(s => s.RedFlag).Select(s => s.Label).ToList();
         var reasons = new List<string>();
@@ -176,7 +184,7 @@ public static partial class RuleBasedAnalyzer
         if (symptoms.Count > 0 && redFlags.Count == 0)
             reasons.Add($"signs reported: {string.Join(", ", symptoms.Select(s => s.Label)).ToLowerInvariant()}");
 
-        if (!string.IsNullOrWhiteSpace(input.VisionAnalysisJson) && input.VisionAnalysisJson.Contains("\"DetectedIssues\":[\"", StringComparison.Ordinal))
+        if (vision is { Available: true, DetectedIssues.Count: > 0 })
         {
             severity = Max(severity, Severity.Medium);
             reasons.Add("the photo analysis flagged possible issues");
@@ -186,6 +194,21 @@ public static partial class RuleBasedAnalyzer
             reasons.Add("no deaths or warning signs were identified in the report");
 
         var summary = $"Rule-based triage (no AI model was used): {string.Join("; ", reasons)}.";
+        var (action, farmerActions) = GuidanceFor(severity);
+
+        return new AIAssessment(
+            severity,
+            summary,
+            action,
+            severity is Severity.High or Severity.Critical,
+            null,
+            Source,
+            farmerActions);
+    }
+
+    /// <summary>Approved supportive care only. Medication and diagnosis require a veterinarian.</summary>
+    public static (string Action, IReadOnlyList<string> FarmerActions) GuidanceFor(Severity severity)
+    {
         var action = severity switch
         {
             Severity.Critical => "Isolate affected animals now, stop movement on and off the farm, and contact a veterinarian today.",
@@ -227,14 +250,7 @@ public static partial class RuleBasedAnalyzer
             }
         };
 
-        return new AIAssessment(
-            severity,
-            summary,
-            action,
-            severity is Severity.High or Severity.Critical,
-            null,
-            Source,
-            farmerActions);
+        return (action, farmerActions);
     }
 
     private static Severity Max(Severity a, Severity b) => a >= b ? a : b;

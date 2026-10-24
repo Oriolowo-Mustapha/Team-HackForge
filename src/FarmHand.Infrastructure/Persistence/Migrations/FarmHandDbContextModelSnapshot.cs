@@ -1092,6 +1092,11 @@ namespace FarmHand.Persistence.Migrations
 
                     b.HasIndex("VetPartnerId");
 
+                    b.HasIndex("IncidentId", "IsDeleted")
+                        .IsUnique()
+                        .HasDatabaseName("IX_VetRequests_OneActivePerIncident")
+                        .HasFilter("\"Status\" IN (0, 1) AND \"IsDeleted\" = FALSE");
+
                     b.ToTable("VetRequests");
                 });
 

@@ -7,4 +7,7 @@ public interface ITreatmentPlanRepository : IRepository<TreatmentPlan>
     Task<IReadOnlyList<TreatmentScheduleItem>> GetScheduleItemsAsync(IEnumerable<Guid> planIds, CancellationToken ct = default);
     Task<TreatmentScheduleItem?> GetScheduleItemAsync(Guid itemId, CancellationToken ct = default);
     Task AddScheduleItemAsync(TreatmentScheduleItem item, CancellationToken ct = default);
+    Task<IReadOnlyList<FarmTreatmentReminder>> GetPendingByFarmAsync(Guid farmId, int take, CancellationToken ct = default);
 }
+
+public record FarmTreatmentReminder(Guid IncidentId, string Action, DateTime DueDate);

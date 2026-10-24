@@ -164,6 +164,8 @@ public class CancelVetRequestCommandHandler : IRequestHandler<CancelVetRequestCo
         var payments = await _unitOfWork.Payments.GetByVetRequestIdAsync(vetRequest.Id, ct);
         if (payments.Any(p => p.Status == PaymentStatus.Completed))
             throw PublicException.Conflict("This request has been paid. Contact support to arrange a cancellation and refund.");
+        if (payments.Any(p => p.Status == PaymentStatus.Pending && !p.IsSimulated))
+            throw PublicException.Conflict("Verify or cancel the pending live checkout before cancelling this request. A provider confirmation may still be on its way.");
 
         foreach (var pending in payments.Where(p => p.Status == PaymentStatus.Pending))
             pending.Cancel();

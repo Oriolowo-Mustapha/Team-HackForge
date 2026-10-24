@@ -16,7 +16,7 @@ namespace FarmHand.Application.Features.Poultry;
 /// </summary>
 /// <param name="ObservationId">Observation id; must match the route value.</param>
 /// <param name="CorrectedNotes">Optional corrected notes that replace the extracted farmer notes.</param>
-/// <param name="OverrideSeverity">Optional farmer-supplied severity that replaces the assessed severity.</param>
+/// <param name="OverrideSeverity">Optional farmer-supplied increase in urgency. Assessed urgency cannot be downgraded.</param>
 /// <param name="OverrideReason">Optional reason for overriding the assessed severity.</param>
 /// <param name="MortalityCount">Optional corrected death count.</param>
 /// <param name="WaterConsumption">Optional corrected water note.</param>
@@ -116,25 +116,19 @@ public class ConfirmObservationCommandHandler : IRequestHandler<ConfirmObservati
         var history = await _farmHistoryService.GetFarmHistoryAsync(observation.FarmId, ct);
         var subject = await DescribeSubjectAsync(observation, ct);
 
-        var assessment = await _aiService.AssessSeverityAsync(new AssessmentInput(
-            observation.RawTranscript,
-            observation.MortalityCount,
-            observation.WaterConsumption,
-            observation.FeedConsumption,
-            observation.EggProduction,
-            observation.FarmerNotes,
-            observation.VisionAnalysis,
-            subject.Description,
-            history,
-            observation.DetectedLanguage), ct);
+        var input = AssessmentSafety.InputFor(observation, subject.Description, history);
+        var assessment = AssessmentSafety.Apply(input,
+            await _aiService.AssessSeverityAsync(input, ct), subject.Headcount);
 
-        // Rule-based triage can use the recorded flock size; AI results are kept as returned.
-        if (assessment.Source == RuleBasedAnalyzer.Source && subject.Headcount is > 0)
+        var finalSeverity = AssessmentSafety.FinalSeverity(assessment.Severity, request.OverrideSeverity);
+        var severityOverridden = finalSeverity != assessment.Severity;
+        var requiresVetConsultation = finalSeverity is Severity.High or Severity.Critical;
+        // Increased farmer urgency must also receive the matching approved escalation advice.
+        if (severityOverridden)
         {
-            assessment = RuleBasedAnalyzer.Assess(new AssessmentInput(
-                observation.RawTranscript, observation.MortalityCount, observation.WaterConsumption,
-                observation.FeedConsumption, observation.EggProduction, observation.FarmerNotes,
-                observation.VisionAnalysis, subject.Description, history, observation.DetectedLanguage), subject.Headcount);
+            var guidance = RuleBasedAnalyzer.GuidanceFor(finalSeverity);
+            assessment = assessment with { RecommendedAction = guidance.Action,
+                FarmerActions = guidance.FarmerActions, RequiresVetConsultation = requiresVetConsultation };
         }
 
         var aiDiagnosis = new AIDiagnosis(
@@ -149,27 +143,8 @@ public class ConfirmObservationCommandHandler : IRequestHandler<ConfirmObservati
 
         await _aiDiagnosisRepository.AddAsync(aiDiagnosis, ct);
 
-        try
-        {
-            await _unitOfWork.SaveChangesAsync(ct);
-        }
-        catch (Exception ex) when (
-            ex.Message.Contains("duplicate key", StringComparison.OrdinalIgnoreCase)
-            || ex.InnerException?.Message.Contains("duplicate key", StringComparison.OrdinalIgnoreCase) == true)
-        {
-            var concurrentDiagnosis = await _aiDiagnosisRepository.GetByObservationIdAsync(observation.Id, ct);
-            if (concurrentDiagnosis is not null)
-                return await BuildExistingResultAsync(observation, concurrentDiagnosis, ct);
-            throw;
-        }
-
         var autoCreated = new List<IncidentDto>();
         Guid? autoCreatedIncidentId = null;
-
-        // Farmer override wins over the assessed severity when supplied.
-        var severityOverridden = request.OverrideSeverity.HasValue && request.OverrideSeverity != assessment.Severity;
-        var finalSeverity = request.OverrideSeverity ?? assessment.Severity;
-        var requiresVetConsultation = finalSeverity is Severity.High or Severity.Critical;
 
         // Business rule: only High or Critical severity opens a case automatically.
         if (requiresVetConsultation)
@@ -203,10 +178,23 @@ public class ConfirmObservationCommandHandler : IRequestHandler<ConfirmObservati
 
         await _audit.RecordAsync("observation.confirmed", observation.Id,
             $"severity={finalSeverity}; source={assessment.Source}; corrected={corrected}", ct: ct);
-        await _unitOfWork.SaveChangesAsync(ct);
+        // One SaveChanges transaction persists the confirmation, diagnosis, incident and audit together.
+        try
+        {
+            await _unitOfWork.SaveChangesAsync(ct);
+        }
+        catch (Exception ex) when (
+            ex.Message.Contains("duplicate key", StringComparison.OrdinalIgnoreCase)
+            || ex.InnerException?.Message.Contains("duplicate key", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            var concurrentDiagnosis = await _aiDiagnosisRepository.GetByObservationIdAsync(observation.Id, ct);
+            if (concurrentDiagnosis is not null)
+                return await BuildExistingResultAsync(observation, concurrentDiagnosis, ct);
+            throw;
+        }
 
-        // Speak the reply back when the farmer reported with their voice: the assessment text
-        // (already written in the farmer's language) is synthesized best effort and never fails the confirm.
+        // Speak approved English safety guidance for voice reports; the detected input language
+        // remains on the report. TTS is best effort and never fails the confirmation.
         var farmerActions = (assessment.FarmerActions ?? []).ToList();
         var responseAudio = await SynthesizeVoiceReplyAsync(
             assessment.DiagnosisSummary, assessment.RecommendedAction, observation, farmerActions, ct);
@@ -227,7 +215,7 @@ public class ConfirmObservationCommandHandler : IRequestHandler<ConfirmObservati
             Mappers.IsAiSource(assessment.Source),
             farmerActions,
             responseAudio,
-            observation.DetectedLanguage);
+            "en");
     }
 
     /// <summary>
@@ -246,7 +234,7 @@ public class ConfirmObservationCommandHandler : IRequestHandler<ConfirmObservati
             return null;
 
         var clipped = replyText.Length > 1000 ? replyText[..1000] : replyText;
-        var tts = await _tts.SynthesizeAsync(clipped, observation.DetectedLanguage, ct);
+        var tts = await _tts.SynthesizeAsync(clipped, "en", ct);
         return tts?.AudioUrl;
     }
 
@@ -283,27 +271,31 @@ public class ConfirmObservationCommandHandler : IRequestHandler<ConfirmObservati
             ? new List<IncidentDto>()
             : new List<IncidentDto> { existingIncident.ToDto() };
 
+        var subject = await DescribeSubjectAsync(observation, ct);
+        var safe = AssessmentSafety.Apply(AssessmentSafety.InputFor(observation, subject.Description),
+            new AIAssessment(existingIncident is { } linked && linked.Severity > diagnosis.Severity ? linked.Severity : diagnosis.Severity,
+                string.Empty, string.Empty, false, null, diagnosis.Source ?? RuleBasedAnalyzer.Source), subject.Headcount);
+
         var responseAudio = await SynthesizeVoiceReplyAsync(
-            diagnosis.DiagnosisSummary, diagnosis.RecommendedAction, observation,
-            Mappers.ReadFarmerActions(diagnosis.FarmerActionsJson), ct);
+            safe.DiagnosisSummary, safe.RecommendedAction, observation, safe.FarmerActions ?? [], ct);
 
         return new ConfirmObservationResult(
             observation.Id,
             observation.ConfirmationStatus.ToString(),
             diagnosis.Severity.ToString(),
-            existingIncident?.Severity.ToString() ?? diagnosis.Severity.ToString(),
+            safe.Severity.ToString(),
             existingIncident is not null && existingIncident.Severity != diagnosis.Severity,
-            diagnosis.DiagnosisSummary,
-            diagnosis.RecommendedAction,
-            diagnosis.RequiresVetConsultation,
+            safe.DiagnosisSummary,
+            safe.RecommendedAction,
+            safe.RequiresVetConsultation,
             diagnosis.IncidentCreated,
             diagnosis.IncidentId,
             existingIncidents,
             diagnosis.Source,
             Mappers.IsAiSource(diagnosis.Source),
-            Mappers.ReadFarmerActions(diagnosis.FarmerActionsJson).ToList(),
+            (safe.FarmerActions ?? []).ToList(),
             responseAudio,
-            observation.DetectedLanguage);
+            "en");
     }
 }
 

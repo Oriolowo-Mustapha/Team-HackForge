@@ -39,7 +39,8 @@ public class PlatformStatsRepository : IPlatformStatsRepository
             .Select(g => new CountByKey(g.Key, g.Count())).ToListAsync(ct);
 
         var completed = await _db.Payments.Where(p => p.Status == PaymentStatus.Completed)
-            .Select(p => new { p.Mode, Total = p.TotalAmount.Amount, Commission = p.PlatformCommission.Amount })
+            .GroupBy(p => p.Mode)
+            .Select(g => new { Mode = g.Key, Total = g.Sum(p => p.TotalAmount.Amount), Commission = g.Sum(p => p.PlatformCommission.Amount) })
             .ToListAsync(ct);
 
         return new PlatformOverview(

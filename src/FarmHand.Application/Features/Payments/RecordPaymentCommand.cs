@@ -212,6 +212,17 @@ public class CancelPaymentCommandHandler : IRequestHandler<CancelPaymentCommand,
 
             if (verification.Outcome == PaymentVerificationOutcome.Error)
                 throw PublicException.Upstream("We could not confirm the checkout status with the provider. Try again shortly.");
+
+            if (verification.Outcome == PaymentVerificationOutcome.Failed)
+            {
+                var outcome = await _settlement.ApplyAsync(payment, verification, "cancel-check", ct);
+                await _unitOfWork.SaveChangesAsync(ct);
+                return new PaymentStatusDto(payment.ToDto(includePayout: false), outcome.Message);
+            }
+
+            // A hosted checkout can still accept money after a local Pending/NotFound result.
+            // Without provider-side cancellation, keep reconciliation open for its eventual webhook.
+            throw PublicException.Conflict("This live checkout is still open at the provider. Check its status again before starting another checkout.");
         }
 
         payment.Cancel();
@@ -258,7 +269,8 @@ public class ProcessPaymentWebhookCommandHandler : IRequestHandler<ProcessPaymen
             : await _paymentService.VerifyByReferenceAsync(request.Reference, ct);
 
         // The provider must confirm the transaction belongs to this payment's reference.
-        if (verification.Reference is not null && !string.Equals(verification.Reference, payment.TransactionReference, StringComparison.Ordinal))
+        if (verification.Outcome == PaymentVerificationOutcome.Successful
+            && !string.Equals(verification.Reference, payment.TransactionReference, StringComparison.Ordinal))
             return "reference_mismatch";
 
         var outcome = await _settlement.ApplyAsync(payment, verification, "webhook", ct);

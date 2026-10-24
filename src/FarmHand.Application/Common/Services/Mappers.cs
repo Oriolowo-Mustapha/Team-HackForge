@@ -50,7 +50,11 @@ public static class Mappers
         if (string.IsNullOrWhiteSpace(json)) return new ExtractionDetails([], []);
         try
         {
-            return JsonSerializer.Deserialize<ExtractionDetails>(json, Json) ?? new ExtractionDetails([], []);
+            var parsed = JsonSerializer.Deserialize<ExtractionDetails>(json, Json);
+            if (parsed is null) return new ExtractionDetails([], []);
+            var approvedQuestions = RuleBasedAnalyzer.Extract(string.Empty).MissingInformation;
+            return new ExtractionDetails(RuleBasedAnalyzer.ApprovedSymptoms(parsed.Symptoms).ToList(),
+                (parsed.MissingInformation ?? []).Where(q => approvedQuestions.Contains(q)).Take(4).ToList());
         }
         catch (JsonException)
         {
@@ -68,7 +72,9 @@ public static class Mappers
         {
             var v = JsonSerializer.Deserialize<StoredVision>(json, Json);
             if (v is null) return null;
-            return new VisionDto(v.Description ?? string.Empty, v.DetectedIssues ?? [], v.Confidence, v.Source, v.Available ?? true);
+            var safe = PhotoSafety.Constrain(new VisionAnalysisResult(string.Empty, v.DetectedIssues ?? [],
+                v.Confidence, v.Source ?? "unknown", v.Available ?? true));
+            return new VisionDto(safe.Description, safe.DetectedIssues, safe.Confidence, safe.Source, safe.Available);
         }
         catch (JsonException)
         {
@@ -96,8 +102,15 @@ public static class Mappers
         }
     }
 
-    public static AssessmentDto ToDto(this AIDiagnosis d) => new(
-        d.Severity, d.DiagnosisSummary, d.RecommendedAction, ReadFarmerActions(d.FarmerActionsJson), d.RequiresVetConsultation, d.Source, IsAiSource(d.Source), d.CreatedAt);
+    public static AssessmentDto ToDto(this AIDiagnosis d, PoultryObservation observation, int? headcount = null)
+    {
+        // Historical model prose is never rendered as current advice. Preserve the stored record
+        // and derive safe display guidance without writing back to the database.
+        var safe = AssessmentSafety.Apply(AssessmentSafety.InputFor(observation),
+            new AIAssessment(d.Severity, string.Empty, string.Empty, false, null, d.Source ?? "rules"), headcount);
+        return new AssessmentDto(safe.Severity, safe.DiagnosisSummary, safe.RecommendedAction,
+            safe.FarmerActions ?? [], safe.RequiresVetConsultation, d.Source, IsAiSource(d.Source), d.CreatedAt);
+    }
 
     public static string SubjectName(LivestockAnimal? animal, LivestockCategory? category) =>
         animal is not null ? animal.Name : category?.Name ?? "Unspecified";

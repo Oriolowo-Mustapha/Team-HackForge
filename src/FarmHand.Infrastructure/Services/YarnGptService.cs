@@ -41,8 +41,8 @@ public class YarnGptService
 
         if (!response.IsSuccessStatusCode)
         {
-            _logger.LogWarning("YarnGPT STT upload failed: {StatusCode} {Body}", response.StatusCode, responseBody);
-            throw new HttpRequestException($"YarnGPT STT failed: {response.StatusCode}");
+            _logger.LogWarning("YarnGPT STT upload failed with {StatusCode}", response.StatusCode);
+            throw new HttpRequestException("YarnGPT transcription is unavailable.", null, response.StatusCode);
         }
 
         using var uploadDoc = JsonDocument.Parse(responseBody);
@@ -76,8 +76,7 @@ public class YarnGptService
 
             if (status == "failed")
             {
-                var errorMsg = doc.RootElement.TryGetProperty("error_message", out var em) ? em.GetString() ?? "Transcription failed" : "Transcription failed";
-                throw new InvalidOperationException($"YarnGPT STT failed: {errorMsg}");
+                throw new InvalidOperationException("YarnGPT transcription failed.");
             }
         }
 
@@ -106,8 +105,8 @@ public class YarnGptService
 
         if (!response.IsSuccessStatusCode)
         {
-            _logger.LogWarning("YarnGPT TTS failed: {StatusCode} {Body}", response.StatusCode, responseBody);
-            throw new HttpRequestException($"YarnGPT TTS failed: {response.StatusCode}");
+            _logger.LogWarning("YarnGPT TTS failed with {StatusCode}", response.StatusCode);
+            throw new HttpRequestException("YarnGPT speech synthesis is unavailable.", null, response.StatusCode);
         }
 
         using var doc = JsonDocument.Parse(responseBody);
@@ -140,8 +139,7 @@ public class YarnGptService
 
             if (status == "failed")
             {
-                var userMsg = doc.RootElement.TryGetProperty("user_message", out var um) ? um.GetString() ?? "Synthesis failed" : "Synthesis failed";
-                throw new InvalidOperationException($"YarnGPT TTS failed: {userMsg}");
+                throw new InvalidOperationException("YarnGPT speech synthesis failed.");
             }
         }
 

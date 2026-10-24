@@ -28,18 +28,15 @@ public class GetIncidentsQueryHandler : IRequestHandler<GetIncidentsQuery, Paged
     {
         await _authorization.EnsureFarmAccessAsync(request.FarmId, ct);
 
-        var incidents = (await _incidentRepository.GetByFarmIdAsync(request.FarmId, ct))
-            .OrderByDescending(i => i.DetectedAt)
-            .ToList();
-
-        var totalCount = incidents.Count;
-        var page = Math.Clamp(request.Page, 1, int.MaxValue);
-        var pageSize = Math.Clamp(request.PageSize, 1, 100);
+        var paging = new Paging(request.Page, request.PageSize);
+        var incidents = await _incidentRepository.SearchAsync(
+            new IncidentSearch([request.FarmId], null, null, null, false, null, null, null, null, null, paging, NewestFirst: true), ct);
+        var totalCount = incidents.TotalCount;
+        var page = paging.Page;
+        var pageSize = paging.PageSize;
         var totalPages = (int)Math.Ceiling(totalCount / (double)pageSize);
 
-        var pageItems = incidents
-            .Skip((page - 1) * pageSize)
-            .Take(pageSize)
+        var pageItems = incidents.Items
             .Select(i => new IncidentDto(
                 i.Id, i.FarmId, i.LivestockAnimalId, i.LivestockCategoryId, i.DetectedAt, i.IncidentType, i.Severity,
                 i.TriggeringObservations, i.EvidenceSummary, i.Status, i.RuleVersion, i.FollowUpDate, i.ResolvedAt))

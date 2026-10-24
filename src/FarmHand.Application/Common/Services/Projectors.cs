@@ -60,7 +60,7 @@ public class ObservationProjector
             o.ConfirmationStatus, o.ExtractedByAi, Mappers.IsAiSource(o.ExtractedByAi),
             extraction.Symptoms, extraction.MissingInformation, o.InputChannels,
             o.DetectedLanguage,
-            diagnosis?.ToDto(), incidentId, reused);
+            diagnosis?.ToDto(o, category?.AnimalCount > 0 ? category.AnimalCount : null), incidentId, reused);
     }
 }
 

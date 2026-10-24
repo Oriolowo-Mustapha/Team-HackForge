@@ -37,4 +37,16 @@ public class TreatmentPlanRepository : EfRepository<TreatmentPlan>, ITreatmentPl
     {
         await DbContext.Set<TreatmentScheduleItem>().AddAsync(item, ct);
     }
+
+    public async Task<IReadOnlyList<FarmTreatmentReminder>> GetPendingByFarmAsync(Guid farmId, int take, CancellationToken ct = default)
+    {
+        return await (from s in DbContext.TreatmentScheduleItems.AsNoTracking()
+                      join p in DbSet on s.TreatmentPlanId equals p.Id
+                      join v in DbContext.VetRequests on p.VetRequestId equals v.Id
+                      join i in DbContext.Incidents on v.IncidentId equals i.Id
+                      where i.FarmId == farmId && !s.IsCompleted
+                      orderby s.DueDate, s.Id
+                      select new FarmTreatmentReminder(i.Id, s.Action, s.DueDate))
+            .Take(Math.Clamp(take, 1, 100)).ToListAsync(ct);
+    }
 }
