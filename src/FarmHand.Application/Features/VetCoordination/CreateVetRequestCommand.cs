@@ -1,5 +1,6 @@
 using FarmHand.Application.Common.Exceptions;
 using FarmHand.Application.Common.Interfaces;
+using FarmHand.Application.Features.Payments;
 using FarmHand.Domain.Entities;
 using FarmHand.Domain.Enums;
 using FarmHand.Domain.Interfaces;
@@ -11,14 +12,13 @@ namespace FarmHand.Application.Features.VetCoordination;
 /// <summary>Creates a vet request for an incident owned by the caller.</summary>
 /// <param name="IncidentId">Incident id; must match the route value.</param>
 /// <param name="RequestType">Coordination model, sent as an integer (0-3): RemoteReview, SharedVisit, CooperativePlan, or ClinicVisit.</param>
-/// <param name="FarmerCost">Fee the farmer offers for the service, in NGN. 0 means no payment is required (e.g. a co-op funded review).</param>
 /// <param name="VetPartnerId">Optional preferred vet. When omitted the request is open to all active vets.</param>
 /// <param name="Description">What the farmer needs help with.</param>
 /// <param name="PreferredVisitDate">Optional preferred date for a visit.</param>
+/// <remarks>The consultation fee is a fixed platform price (<see cref="PaymentPolicy.FixedConsultationFee"/>, in NGN) — callers do not offer their own amount.</remarks>
 public record CreateVetRequestCommand(
     Guid IncidentId,
     RequestType RequestType,
-    decimal FarmerCost,
     Guid? VetPartnerId = null,
     string? Description = null,
     DateTime? PreferredVisitDate = null) : IRequest<Guid>;
@@ -79,7 +79,7 @@ public class CreateVetRequestCommandHandler : IRequestHandler<CreateVetRequestCo
         var vetRequest = new VetRequest(
             request.IncidentId,
             request.RequestType,
-            new Domain.ValueObjects.Money(request.FarmerCost),
+            new Domain.ValueObjects.Money(PaymentPolicy.FixedConsultationFee),
             request.VetPartnerId,
             string.IsNullOrWhiteSpace(request.Description) ? null : request.Description.Trim(),
             request.PreferredVisitDate,
@@ -87,7 +87,7 @@ public class CreateVetRequestCommandHandler : IRequestHandler<CreateVetRequestCo
 
         await _vetRequestRepository.AddAsync(vetRequest, ct);
         await _audit.RecordAsync("vet_request.created", vetRequest.Id,
-            $"incident={incident.Id}; targeted={(request.VetPartnerId is null ? "no" : "yes")}; cost={request.FarmerCost:0.00}", ct: ct);
+            $"incident={incident.Id}; targeted={(request.VetPartnerId is null ? "no" : "yes")}; cost={PaymentPolicy.FixedConsultationFee:0.00}", ct: ct);
         await _unitOfWork.SaveChangesAsync(ct);
 
         await NotifyVetsAsync(vetRequest, incident, ct);
@@ -129,7 +129,7 @@ public class CreateVetRequestCommandHandler : IRequestHandler<CreateVetRequestCo
         <table>
         <tr><td>Case</td><td>{System.Net.WebUtility.HtmlEncode(incident.IncidentType)} ({incident.Severity} severity)</td></tr>
         <tr><td>Service</td><td>{vetRequest.RequestType}</td></tr>
-        <tr><td>Offered fee</td><td>{vetRequest.FarmerCost.Amount:N2} {vetRequest.FarmerCost.Currency}</td></tr>
+        <tr><td>Consultation fee</td><td>{vetRequest.FarmerCost.Amount:N2} {vetRequest.FarmerCost.Currency}</td></tr>
         </table>
         <p>Sign in to FarmHand to review the case summary. The first vet to accept an open request is assigned to it.</p>
         """;
@@ -141,9 +141,6 @@ public class CreateVetRequestCommandValidator : AbstractValidator<CreateVetReque
     {
         RuleFor(x => x.IncidentId).NotEqual(Guid.Empty);
         RuleFor(x => x.RequestType).IsInEnum();
-        RuleFor(x => x.FarmerCost)
-            .Must(c => c == 0 || (c >= 100 && c <= 5_000_000))
-            .WithMessage("The fee must be 0 (no payment) or between ₦100 and ₦5,000,000.");
         RuleFor(x => x.Description).MaximumLength(1000);
         RuleFor(x => x.PreferredVisitDate)
             .GreaterThanOrEqualTo(_ => DateTime.UtcNow.Date)

@@ -194,13 +194,47 @@ public static partial class RuleBasedAnalyzer
             _ => "Keep observing and record any change. Report again if animals stop eating or deaths occur."
         };
 
+        // Practical care steps the farmer can do at farm level; the vet is already covered by the action above.
+        var farmerActions = severity switch
+        {
+            Severity.Critical => new[]
+            {
+                "Separate sick or dying animals from the healthy ones immediately",
+                "Stop moving animals, people, tools and feed items on and off the farm",
+                "Provide clean water and easy-to-eat feed; do not medicate on your own",
+                "Record every death and new sign (time, number, what you saw)",
+                "Prepare a clear path and light for the vet's arrival"
+            },
+            Severity.High => new[]
+            {
+                "Separate animals showing signs from the healthy flock",
+                "Deepen biosecurity: disinfect boots, equipment and coops in use",
+                "Provide fresh water and check feed and water intake twice a day",
+                "Record deaths and signs so the vet can see the trend"
+            },
+            Severity.Medium => new[]
+            {
+                "Watch the animals closely for the next 24–48 hours",
+                "Check feed and water consumption daily",
+                "Improve housing hygiene and ventilation",
+                "Report again immediately if more animals show signs or die"
+            },
+            _ => new[]
+            {
+                "Keep observing the animals and note any changes",
+                "Ensure feed and water stay clean and available",
+                "Report again if animals stop eating or any deaths occur"
+            }
+        };
+
         return new AIAssessment(
             severity,
             summary,
             action,
             severity is Severity.High or Severity.Critical,
             null,
-            Source);
+            Source,
+            farmerActions);
     }
 
     private static Severity Max(Severity a, Severity b) => a >= b ? a : b;

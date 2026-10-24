@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
-import { PaymentsScreen } from "@/components/payments/payment-screens";
+import { PaymentsScreen } from "./payments-screen";
+
 export const metadata: Metadata = { title: "Payments" };
-export default function Page() {
+
+export default function PaymentsPage() {
   return <PaymentsScreen />;
 }

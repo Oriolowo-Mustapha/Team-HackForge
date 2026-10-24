@@ -34,7 +34,7 @@ export default function AboutPage() {
         </section>
         <section>
           <h2 className="text-xl font-semibold">Photography</h2>
-          <p className="mt-2 text-[15px] text-muted">All photographs are public-domain (CC0) images.</p>
+          <p className="mt-2 text-[15px] text-muted">Farm photography is public-domain or Creative Commons-licensed. Each credit below links to the original.</p>
           <ul className="mt-4 divide-y divide-line rounded-[24px] bg-paper ring-1 ring-line/60">
             {(credits as Credit[]).map((c) => (
               <li key={c.file} className="px-5 py-3 text-sm">

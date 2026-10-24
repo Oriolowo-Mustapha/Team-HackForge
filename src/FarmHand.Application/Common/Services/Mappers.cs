@@ -80,8 +80,24 @@ public static class Mappers
         source is not null && (source.StartsWith("gemini", StringComparison.OrdinalIgnoreCase) || source.StartsWith("groq", StringComparison.OrdinalIgnoreCase)
             || source.StartsWith("Gemini/Groq", StringComparison.OrdinalIgnoreCase));
 
+    public static string SerializeFarmerActions(IReadOnlyList<string> actions) =>
+        JsonSerializer.Serialize(actions ?? []);
+
+    public static IReadOnlyList<string> ReadFarmerActions(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return [];
+        try
+        {
+            return JsonSerializer.Deserialize<List<string>>(json, Json) ?? [];
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+    }
+
     public static AssessmentDto ToDto(this AIDiagnosis d) => new(
-        d.Severity, d.DiagnosisSummary, d.RecommendedAction, d.RequiresVetConsultation, d.Source, IsAiSource(d.Source), d.CreatedAt);
+        d.Severity, d.DiagnosisSummary, d.RecommendedAction, ReadFarmerActions(d.FarmerActionsJson), d.RequiresVetConsultation, d.Source, IsAiSource(d.Source), d.CreatedAt);
 
     public static string SubjectName(LivestockAnimal? animal, LivestockCategory? category) =>
         animal is not null ? animal.Name : category?.Name ?? "Unspecified";

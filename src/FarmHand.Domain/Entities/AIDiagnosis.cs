@@ -7,6 +7,9 @@ public class AIDiagnosis : BaseEntity
     public Severity Severity { get; protected set; }
     public string DiagnosisSummary { get; protected set; } = string.Empty;
     public string RecommendedAction { get; protected set; } = string.Empty;
+
+    /// <summary>JSON array of practical care steps the farmer can do at the farm level, no vet required.</summary>
+    public string? FarmerActionsJson { get; protected set; }
     public bool RequiresVetConsultation { get; protected set; }
     public bool IncidentCreated { get; protected set; }
     public string? RawAssessment { get; protected set; }
@@ -23,12 +26,14 @@ public class AIDiagnosis : BaseEntity
         string recommendedAction,
         bool requiresVetConsultation,
         string? rawAssessment = null,
-        string? source = null)
+        string? source = null,
+        string? farmerActionsJson = null)
     {
         ObservationId = observationId;
         Severity = severity;
         DiagnosisSummary = diagnosisSummary;
         RecommendedAction = recommendedAction;
+        FarmerActionsJson = farmerActionsJson;
         RequiresVetConsultation = requiresVetConsultation;
         IncidentCreated = false;
         RawAssessment = rawAssessment;

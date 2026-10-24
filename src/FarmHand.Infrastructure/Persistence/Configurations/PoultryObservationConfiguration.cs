@@ -21,6 +21,7 @@ public class PoultryObservationConfiguration : IEntityTypeConfiguration<PoultryO
         builder.Property(x => x.ExtractedByAi).HasMaxLength(100);
         builder.Property(x => x.ExtractionDetails).HasMaxLength(4000);
         builder.Property(x => x.InputChannels).HasMaxLength(50);
+        builder.Property(x => x.DetectedLanguage).HasMaxLength(20);
         builder.HasIndex(x => x.FarmId);
         builder.HasIndex(x => x.LivestockAnimalId);
         builder.HasIndex(x => x.LivestockCategoryId);

@@ -61,6 +61,8 @@ public static class ServiceRegistration
         services.AddScoped<IFarmAiService, FarmAiService>();
         services.AddScoped<IVisionAnalysisService, VisionAnalysisService>();
         services.AddScoped<ITranscriptionService, TranscriptionService>();
+        services.AddScoped<ITtsService, TtsService>();
+        services.AddSingleton<IVoiceReplySettings, VoiceReplySettings>();
         services.AddScoped<IFarmHistoryService, FarmHistoryService>();
 
         // Payments: never retry unsafe (POST/PUT) calls to the provider; verification GETs may retry.

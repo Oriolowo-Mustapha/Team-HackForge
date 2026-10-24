@@ -11,12 +11,14 @@ public record ExtractedObservation(
 /// <summary>
 /// Result of turning free text into structured observation fields, including which engine produced it.
 /// <see cref="Source"/> is "gemini:&lt;model&gt;", "groq:&lt;model&gt;", "rules" (explicitly enabled demo fallback) or "manual".
+/// <see cref="DetectedLanguage"/> is the report language as a canonical code ("yo", "ha", "ig", "pcm", "en") when known.
 /// </summary>
 public record ObservationExtraction(
     ExtractedObservation Fields,
     IReadOnlyList<string> Symptoms,
     IReadOnlyList<string> MissingInformation,
-    string Source)
+    string Source,
+    string? DetectedLanguage = null)
 {
     public bool IsAi => Source.StartsWith("gemini:", StringComparison.Ordinal) || Source.StartsWith("groq:", StringComparison.Ordinal);
 }
@@ -49,14 +51,16 @@ public record LivestockHistorySummary(
     DateTime? LastVeterinaryVisit,
     string? Vaccinations);
 
-/// <summary>Severity assessment. <see cref="Source"/> is the AI model or "rules" when the rule-based triage was used.</summary>
+/// <summary>Severity assessment. <see cref="Source"/> is the AI model or "rules" when the rule-based triage was used.
+/// <see cref="FarmerActions"/> lists practical care steps the farmer can do at the farm level without a vet.</summary>
 public record AIAssessment(
     FarmHand.Domain.Enums.Severity Severity,
     string DiagnosisSummary,
     string RecommendedAction,
     bool RequiresVetConsultation,
     string? RawAssessment,
-    string Source = "rules");
+    string Source = "rules",
+    IReadOnlyList<string>? FarmerActions = null);
 
 /// <summary>Everything the assessment can use about the observation being confirmed.</summary>
 public record AssessmentInput(
@@ -68,7 +72,8 @@ public record AssessmentInput(
     string? FarmerNotes,
     string? VisionAnalysisJson,
     string? SubjectDescription,
-    FarmHistoryContext? History);
+    FarmHistoryContext? History,
+    string? ReportLanguage = null);
 
 public interface IFarmAiService
 {

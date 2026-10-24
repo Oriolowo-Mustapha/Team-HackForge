@@ -45,7 +45,10 @@ public record ConfirmObservationResult(
     Guid? AutoCreatedIncidentId,
     List<IncidentDto> AutoCreatedIncidents,
     string? AssessmentSource = null,
-    bool AssessmentIsAi = false);
+    bool AssessmentIsAi = false,
+    List<string>? AiFarmerActions = null,
+    string? ResponseAudioUrl = null,
+    string? ResponseLanguage = null);
 
 public class ConfirmObservationCommandHandler : IRequestHandler<ConfirmObservationCommand, ConfirmObservationResult>
 {
@@ -54,6 +57,8 @@ public class ConfirmObservationCommandHandler : IRequestHandler<ConfirmObservati
     private readonly IAIDiagnosisRepository _aiDiagnosisRepository;
     private readonly IFarmAiService _aiService;
     private readonly IFarmHistoryService _farmHistoryService;
+    private readonly ITtsService _tts;
+    private readonly IVoiceReplySettings _voiceSettings;
     private readonly IUnitOfWork _unitOfWork;
     private readonly IResourceAuthorizationService _authorization;
     private readonly IAuditLogger _audit;
@@ -64,6 +69,8 @@ public class ConfirmObservationCommandHandler : IRequestHandler<ConfirmObservati
         IAIDiagnosisRepository aiDiagnosisRepository,
         IFarmAiService aiService,
         IFarmHistoryService farmHistoryService,
+        ITtsService tts,
+        IVoiceReplySettings voiceSettings,
         IUnitOfWork unitOfWork,
         IResourceAuthorizationService authorization,
         IAuditLogger audit)
@@ -73,6 +80,8 @@ public class ConfirmObservationCommandHandler : IRequestHandler<ConfirmObservati
         _aiDiagnosisRepository = aiDiagnosisRepository;
         _aiService = aiService;
         _farmHistoryService = farmHistoryService;
+        _tts = tts;
+        _voiceSettings = voiceSettings;
         _unitOfWork = unitOfWork;
         _authorization = authorization;
         _audit = audit;
@@ -88,7 +97,7 @@ public class ConfirmObservationCommandHandler : IRequestHandler<ConfirmObservati
         // Idempotency: a repeated confirm must not re-run the AI or duplicate incidents.
         var existingDiagnosis = await _aiDiagnosisRepository.GetByObservationIdAsync(observation.Id, ct);
         if (!observation.IsPending && existingDiagnosis is not null)
-            return await BuildExistingResultAsync(observation, existingDiagnosis, _incidentRepository, ct);
+            return await BuildExistingResultAsync(observation, existingDiagnosis, ct);
 
         if (!observation.IsPending)
             throw PublicException.Conflict("This report has already been confirmed.");
@@ -116,7 +125,8 @@ public class ConfirmObservationCommandHandler : IRequestHandler<ConfirmObservati
             observation.FarmerNotes,
             observation.VisionAnalysis,
             subject.Description,
-            history), ct);
+            history,
+            observation.DetectedLanguage), ct);
 
         // Rule-based triage can use the recorded flock size; AI results are kept as returned.
         if (assessment.Source == RuleBasedAnalyzer.Source && subject.Headcount is > 0)
@@ -124,7 +134,7 @@ public class ConfirmObservationCommandHandler : IRequestHandler<ConfirmObservati
             assessment = RuleBasedAnalyzer.Assess(new AssessmentInput(
                 observation.RawTranscript, observation.MortalityCount, observation.WaterConsumption,
                 observation.FeedConsumption, observation.EggProduction, observation.FarmerNotes,
-                observation.VisionAnalysis, subject.Description, history), subject.Headcount);
+                observation.VisionAnalysis, subject.Description, history, observation.DetectedLanguage), subject.Headcount);
         }
 
         var aiDiagnosis = new AIDiagnosis(
@@ -134,7 +144,8 @@ public class ConfirmObservationCommandHandler : IRequestHandler<ConfirmObservati
             assessment.RecommendedAction,
             assessment.RequiresVetConsultation,
             assessment.RawAssessment,
-            assessment.Source);
+            assessment.Source,
+            Mappers.SerializeFarmerActions((assessment.FarmerActions ?? []).ToList()));
 
         await _aiDiagnosisRepository.AddAsync(aiDiagnosis, ct);
 
@@ -148,7 +159,7 @@ public class ConfirmObservationCommandHandler : IRequestHandler<ConfirmObservati
         {
             var concurrentDiagnosis = await _aiDiagnosisRepository.GetByObservationIdAsync(observation.Id, ct);
             if (concurrentDiagnosis is not null)
-                return await BuildExistingResultAsync(observation, concurrentDiagnosis, _incidentRepository, ct);
+                return await BuildExistingResultAsync(observation, concurrentDiagnosis, ct);
             throw;
         }
 
@@ -194,6 +205,12 @@ public class ConfirmObservationCommandHandler : IRequestHandler<ConfirmObservati
             $"severity={finalSeverity}; source={assessment.Source}; corrected={corrected}", ct: ct);
         await _unitOfWork.SaveChangesAsync(ct);
 
+        // Speak the reply back when the farmer reported with their voice: the assessment text
+        // (already written in the farmer's language) is synthesized best effort and never fails the confirm.
+        var farmerActions = (assessment.FarmerActions ?? []).ToList();
+        var responseAudio = await SynthesizeVoiceReplyAsync(
+            assessment.DiagnosisSummary, assessment.RecommendedAction, observation, farmerActions, ct);
+
         return new ConfirmObservationResult(
             observation.Id,
             observation.ConfirmationStatus.ToString(),
@@ -207,8 +224,35 @@ public class ConfirmObservationCommandHandler : IRequestHandler<ConfirmObservati
             autoCreatedIncidentId,
             autoCreated,
             assessment.Source,
-            Mappers.IsAiSource(assessment.Source));
+            Mappers.IsAiSource(assessment.Source),
+            farmerActions,
+            responseAudio,
+            observation.DetectedLanguage);
     }
+
+    /// <summary>
+    /// Returns spoken audio for the assessment when the report arrived as a voice note and the
+    /// feature is enabled. Returns null on any failure (or when TTS is unavailable).
+    /// </summary>
+    private async Task<string?> SynthesizeVoiceReplyAsync(
+        string? summary, string? recommendedAction, PoultryObservation observation, IReadOnlyList<string> farmerActions, CancellationToken ct)
+    {
+        var parts = new List<string>();
+        if (!string.IsNullOrWhiteSpace(summary)) parts.Add(summary);
+        if (!string.IsNullOrWhiteSpace(recommendedAction)) parts.Add("Next steps: " + recommendedAction);
+        if (farmerActions.Count > 0) parts.Add("What you can do now: " + string.Join("; ", farmerActions.Take(2)));
+        var replyText = string.Join(". ", parts);
+        if (!_voiceSettings.RespondWithVoice || !IsVoiceReport(observation.InputChannels) || string.IsNullOrWhiteSpace(replyText))
+            return null;
+
+        var clipped = replyText.Length > 1000 ? replyText[..1000] : replyText;
+        var tts = await _tts.SynthesizeAsync(clipped, observation.DetectedLanguage, ct);
+        return tts?.AudioUrl;
+    }
+
+    private static bool IsVoiceReport(string? inputChannels) =>
+        inputChannels?.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+            .Any(c => c.Equals("voice", StringComparison.OrdinalIgnoreCase)) == true;
 
     private sealed record SubjectInfo(string Name, string Description, int? Headcount);
 
@@ -227,18 +271,21 @@ public class ConfirmObservationCommandHandler : IRequestHandler<ConfirmObservati
 
     private static string Truncate(string value, int max) => value.Length <= max ? value : value[..max];
 
-    private static async Task<ConfirmObservationResult> BuildExistingResultAsync(
+    private async Task<ConfirmObservationResult> BuildExistingResultAsync(
         PoultryObservation observation,
         AIDiagnosis diagnosis,
-        IIncidentRepository incidentRepository,
         CancellationToken ct)
     {
         var existingIncident = diagnosis.IncidentId is { } incidentId
-            ? await incidentRepository.GetByIdAsync(incidentId, ct)
+            ? await _incidentRepository.GetByIdAsync(incidentId, ct)
             : null;
         var existingIncidents = existingIncident is null
             ? new List<IncidentDto>()
             : new List<IncidentDto> { existingIncident.ToDto() };
+
+        var responseAudio = await SynthesizeVoiceReplyAsync(
+            diagnosis.DiagnosisSummary, diagnosis.RecommendedAction, observation,
+            Mappers.ReadFarmerActions(diagnosis.FarmerActionsJson), ct);
 
         return new ConfirmObservationResult(
             observation.Id,
@@ -253,7 +300,10 @@ public class ConfirmObservationCommandHandler : IRequestHandler<ConfirmObservati
             diagnosis.IncidentId,
             existingIncidents,
             diagnosis.Source,
-            Mappers.IsAiSource(diagnosis.Source));
+            Mappers.IsAiSource(diagnosis.Source),
+            Mappers.ReadFarmerActions(diagnosis.FarmerActionsJson).ToList(),
+            responseAudio,
+            observation.DetectedLanguage);
     }
 }
 

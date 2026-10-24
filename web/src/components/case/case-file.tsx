@@ -40,6 +40,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState, InlineError, Notice } from "@/components/ui/states";
 import { RequestVetModal } from "./request-vet-modal";
 import { TreatmentPlanModal } from "./treatment-plan-modal";
+import { ListenButton } from "@/components/domain/listen-button";
 
 export function CaseFile({ id, openRequest }: { id: string; openRequest?: boolean }) {
   const { user } = useSession();
@@ -329,7 +330,10 @@ function TreatmentPlans({ plans, incidentId, canWrite }: { plans: TreatmentPlan[
             <p className="text-sm text-muted">
               From {plan.authorName ?? "your vet"} · {formatDate(plan.createdAt)}
             </p>
-            <p className="mt-2 whitespace-pre-line text-[15px] leading-relaxed">{plan.instructionsText}</p>
+            <div className="mt-1 flex items-center justify-between">
+              <p className="whitespace-pre-line text-[15px] leading-relaxed">{plan.instructionsText}</p>
+            </div>
+            <ListenButton text={plan.instructionsText} label="Listen to instructions" variant="pill" className="mt-3" />
             {plan.schedule.length > 0 && (
               <ol className="mt-4 space-y-2">
                 {plan.schedule.map((s) => {

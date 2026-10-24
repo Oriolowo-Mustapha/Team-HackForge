@@ -27,6 +27,8 @@ public class PoultryObservation : BaseEntity
     /// <summary>JSON with extracted symptoms and missing-information prompts.</summary>
     public string? ExtractionDetails { get; protected set; }
     public string? InputChannels { get; protected set; }
+    /// <summary>Language detected from the voice report, e.g. "yo", "ha", "ig", "pcm", "en".</summary>
+    public string? DetectedLanguage { get; protected set; }
     public string? IdempotencyKey { get; protected set; }
 
     protected PoultryObservation() { }
@@ -145,5 +147,10 @@ public class PoultryObservation : BaseEntity
         ImageUrl = imageUrl;
         VisionAnalysis = visionAnalysis;
         MarkUpdated();
+    }
+
+    public void SetDetectedLanguage(string? language)
+    {
+        DetectedLanguage = language?.Trim().ToLowerInvariant();
     }
 }

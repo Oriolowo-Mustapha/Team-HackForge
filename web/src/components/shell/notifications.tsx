@@ -43,7 +43,7 @@ function useFarmerItems(enabled: boolean): Item[] {
         href: `/pay/${r.id}`,
         icon: <Wallet />,
         title: `${r.vet?.name ?? "A vet"} accepted your request`,
-        detail: `Pay ${formatMoney(r.farmerCost, r.currency)} to confirm the ${requestTypeMeta[r.requestType]?.label.toLowerCase() ?? "visit"}`,
+        detail: `Pay the fixed ${formatMoney(r.farmerCost, r.currency)} consultation fee (+FarmHand's 5% service) to confirm the ${requestTypeMeta[r.requestType]?.label.toLowerCase() ?? "visit"}`,
         urgent: true,
       });
     } else if (r.status === RequestStatus.Responded) {

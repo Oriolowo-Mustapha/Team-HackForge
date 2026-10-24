@@ -113,10 +113,12 @@ public class SubmitObservationCommandHandler : IRequestHandler<SubmitObservation
 
         // 1. Voice note -> transcript (skipped for manual entry, where the farmer types instead).
         string? transcript = null;
+        string? sttLanguage = null;
         if (audioType is not null && !request.ManualEntry)
         {
             var result = await _transcription.TranscribeAsync(request.Audio!, audioType, request.AudioFileName ?? "voice-note", key, ct);
             transcript = result.Transcript;
+            sttLanguage = result.DetectedLanguage;
             channels.Add("voice");
         }
 
@@ -179,6 +181,12 @@ public class SubmitObservationCommandHandler : IRequestHandler<SubmitObservation
             fields.FarmerNotes,
             stored?.Url,
             vision is null ? null : Mappers.SerializeVision(vision));
+
+        // Remember the report's language (speech-to-text detection first, then AI detection of typed reports)
+        // so the reply can be written back in the same language the farmer used.
+        var reportLanguage = LanguageCodes.Normalize(sttLanguage) ?? LanguageCodes.Normalize(extraction.DetectedLanguage);
+        if (reportLanguage is not null)
+            observation.SetDetectedLanguage(reportLanguage);
 
         observation.MarkAiExtracted(extraction.Source);
         observation.SetExtractionDetails(Mappers.SerializeExtraction(extraction));

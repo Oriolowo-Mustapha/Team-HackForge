@@ -1,9 +1,9 @@
-import { PayScreen } from "@/components/payments/payment-screens";
-export default async function Page({
-  params,
-}: {
-  params: Promise<{ id: string }>;
-}) {
+import type { Metadata } from "next";
+import { PayScreen } from "./pay-screen";
+
+export const metadata: Metadata = { title: "Review and pay" };
+
+export default async function PayPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  return <PayScreen requestId={id} />;
+  return <PayScreen vetRequestId={id} />;
 }

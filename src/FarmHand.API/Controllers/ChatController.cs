@@ -126,7 +126,10 @@ public class ChatController : ControllerBase
             autoCreatedIncidentId = result.AutoCreatedIncidentId,
             autoCreatedIncidents = result.AutoCreatedIncidents,
             assessmentSource = result.AssessmentSource,
-            assessmentIsAi = result.AssessmentIsAi
+            assessmentIsAi = result.AssessmentIsAi,
+            aiFarmerActions = result.AiFarmerActions,
+            responseAudioUrl = result.ResponseAudioUrl,
+            responseLanguage = result.ResponseLanguage
         });
     }
 

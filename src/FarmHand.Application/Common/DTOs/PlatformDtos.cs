@@ -83,6 +83,7 @@ public record AssessmentDto(
     Severity Severity,
     string Summary,
     string RecommendedAction,
+    IReadOnlyList<string> FarmerActions,
     bool RequiresVetConsultation,
     string? Source,
     bool IsAi,
@@ -119,6 +120,7 @@ public record ObservationDetailDto(
     IReadOnlyList<string> Symptoms,
     IReadOnlyList<string> MissingInformation,
     string? InputChannels,
+    string? DetectedLanguage,
     AssessmentDto? Assessment,
     Guid? IncidentId,
     bool Reused);
