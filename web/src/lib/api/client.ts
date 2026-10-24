@@ -26,7 +26,7 @@ export class ApiError extends Error {
   }
 
   get isNetwork() {
-    return this.status === 0 || this.code === "api_unreachable";
+    return this.status === 0;
   }
 }
 

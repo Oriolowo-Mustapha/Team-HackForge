@@ -18,6 +18,10 @@ namespace FarmHand.Application.Features.Observations;
 /// <param name="Image">Photo bytes (JPEG, PNG, WebP or HEIC; max 8 MB).</param>
 /// <param name="IdempotencyKey">Client-generated key that makes retries safe.</param>
 /// <param name="ManualEntry">When true, AI is skipped and the supplied fields are stored as entered.</param>
+/// <param name="MortalityCount">Manual mortality count.</param>
+/// <param name="WaterConsumption">Manual water consumption.</param>
+/// <param name="FeedConsumption">Manual feed consumption.</param>
+/// <param name="EggProduction">Manual egg production.</param>
 public record SubmitObservationCommand(
     Guid FarmId,
     Guid? LivestockAnimalId,

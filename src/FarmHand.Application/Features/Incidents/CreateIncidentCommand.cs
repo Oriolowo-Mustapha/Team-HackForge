@@ -14,6 +14,7 @@ namespace FarmHand.Application.Features.Incidents;
 /// <param name="TriggeringObservations">Evidence that triggered the incident.</param>
 /// <param name="EvidenceSummary">Summary shown to the farmer and vet.</param>
 /// <param name="RuleVersion">Optional detection rule version.</param>
+/// <param name="SourceObservationId">Confirmed observation that caused this case.</param>
 public record CreateIncidentCommand(
     Guid FarmId,
     Guid? LivestockAnimalId,

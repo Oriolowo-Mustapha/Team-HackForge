@@ -11,3 +11,8 @@ appsettings.Development.json
 node_modules/
 frontend/.next/
 publish/
+.env.*
+!.env.example
+TestResults/
+uploads/
+.local/

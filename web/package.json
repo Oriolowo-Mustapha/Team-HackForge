@@ -4,14 +4,15 @@
   "private": true,
   "description": "FarmHand web app and installable PWA: AI-assisted livestock and poultry health for farmers, vets and administrators.",
   "scripts": {
-    "dev": "next dev -p 3000",
-    "build": "next build",
+    "dev": "next dev --webpack -H 127.0.0.1 -p 3000",
+    "build": "next build --webpack",
     "start": "next start -p 3000",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "icons": "node scripts/generate-icons.mjs",
     "images": "node scripts/optimize-images.mjs",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test": "node --test tests/unit/*.test.mjs"
   },
   "dependencies": {
     "@fontsource-variable/plus-jakarta-sans": "5.3.0",
@@ -36,7 +37,7 @@
     "@types/node": "22.20.5",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
-    "eslint": "^10.13.0",
+    "eslint": "10.13.0",
     "eslint-config-next": "16.4.3",
     "sharp": "0.35.5",
     "tailwindcss": "4.3.3",

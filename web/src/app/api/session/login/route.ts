@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { BodyTooLargeError, readBoundedBody } from "@/lib/server/request-body";
 import { apiBaseUrl, forwardedFor, isTrustedMutation, problem, writeSessionCookies, type LoginPayload } from "@/lib/server/session";
 
 export const dynamic = "force-dynamic";
@@ -9,8 +10,9 @@ export async function POST(request: Request) {
 
   let body: { email?: unknown; password?: unknown };
   try {
-    body = await request.json();
-  } catch {
+    body = JSON.parse(new TextDecoder().decode(await readBoundedBody(request, 16 * 1024)));
+  } catch (error) {
+    if (error instanceof BodyTooLargeError) return problem(413, "The request is too large.");
     return problem(400, "Invalid request.");
   }
 
@@ -20,10 +22,10 @@ export async function POST(request: Request) {
       method: "POST",
       headers: { "content-type": "application/json", ...forwardedFor(request) },
       body: JSON.stringify({ email: body.email, password: body.password }),
-      cache: "no-store",
+      cache: "no-store", signal: AbortSignal.timeout(15_000),
     });
   } catch {
-    return problem(503, "The FarmHand service is unreachable. Check your connection and try again.", "api_unreachable");
+    return problem(503, "FarmHand is temporarily unavailable. Please try again shortly.", "api_unreachable");
   }
 
   if (!upstream.ok) {

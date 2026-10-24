@@ -5,7 +5,13 @@ export const dynamic = "force-dynamic";
 
 /** Returns the signed-in user's profile (refreshing the session if needed), or `{ authenticated: false }`. */
 export async function GET(request: Request) {
-  const { token, rotated, expired } = await resolveAccessToken(request);
+  let session: Awaited<ReturnType<typeof resolveAccessToken>>;
+  try {
+    session = await resolveAccessToken(request);
+  } catch {
+    return NextResponse.json({ status: 503, title: "FarmHand is temporarily unavailable.", code: "api_unreachable" }, { status: 503, headers: { "cache-control": "no-store" } });
+  }
+  const { token, rotated, expired } = session;
   if (!token) {
     const response = NextResponse.json({ authenticated: false, expired }, { headers: { "cache-control": "no-store" } });
     if (expired) clearSessionCookies(response.cookies);
@@ -16,10 +22,10 @@ export async function GET(request: Request) {
   try {
     me = await fetch(`${apiBaseUrl()}/api/auth/me`, {
       headers: { authorization: `Bearer ${token}`, ...forwardedFor(request) },
-      cache: "no-store",
+      cache: "no-store", signal: AbortSignal.timeout(15_000),
     });
   } catch {
-    return NextResponse.json({ status: 503, title: "The FarmHand service is unreachable.", code: "api_unreachable" }, { status: 503 });
+    return NextResponse.json({ status: 503, title: "FarmHand is temporarily unavailable. Please try again shortly.", code: "api_unreachable" }, { status: 503 });
   }
 
   if (me.status === 401) {

@@ -59,6 +59,8 @@ public class CreateAuditEventCommandValidator : AbstractValidator<CreateAuditEve
 /// <param name="ActorId">Optional actor id filter.</param>
 /// <param name="EventType">Optional event type filter.</param>
 /// <param name="RelatedRecordId">Optional related record filter.</param>
+/// <param name="Page">One-based page number.</param>
+/// <param name="PageSize">Maximum records on a page.</param>
 public record GetAuditEventsQuery(string? ActorId, string? EventType, Guid? RelatedRecordId = null, int Page = 1, int PageSize = 50)
     : IRequest<PagedResult<AuditEventDto>>;
 

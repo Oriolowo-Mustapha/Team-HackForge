@@ -1,7 +1,7 @@
 # See https://aka.ms/customizecontainer to learn how to customize your debug container and how Visual Studio uses this Dockerfile to build your images for faster debugging.
 
 # This stage is used when running from VS in fast mode (Default for Debug configuration)
-FROM mcr.microsoft.com/dotnet/aspnet:9.0 AS base
+FROM mcr.microsoft.com/dotnet/aspnet:10.0.13 AS base
 USER $APP_UID
 WORKDIR /app
 EXPOSE 8080
@@ -9,7 +9,7 @@ EXPOSE 8081
 
 
 # This stage is used to build the service project
-FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build
+FROM mcr.microsoft.com/dotnet/sdk:10.0.402 AS build
 ARG BUILD_CONFIGURATION=Release
 WORKDIR /src
 COPY ["Directory.Packages.props", "."]
@@ -18,7 +18,11 @@ COPY ["src/FarmHand.API/FarmHand.API.csproj", "src/FarmHand.API/"]
 COPY ["src/FarmHand.Application/FarmHand.Application.csproj", "src/FarmHand.Application/"]
 COPY ["src/FarmHand.Domain/FarmHand.Domain.csproj", "src/FarmHand.Domain/"]
 COPY ["src/FarmHand.Infrastructure/FarmHand.Infrastructure.csproj", "src/FarmHand.Infrastructure/"]
-RUN dotnet restore "./src/FarmHand.API/FarmHand.API.csproj"
+COPY ["src/FarmHand.API/packages.lock.json", "src/FarmHand.API/"]
+COPY ["src/FarmHand.Application/packages.lock.json", "src/FarmHand.Application/"]
+COPY ["src/FarmHand.Domain/packages.lock.json", "src/FarmHand.Domain/"]
+COPY ["src/FarmHand.Infrastructure/packages.lock.json", "src/FarmHand.Infrastructure/"]
+RUN dotnet restore "./src/FarmHand.API/FarmHand.API.csproj" --locked-mode
 COPY . .
 WORKDIR "/src/src/FarmHand.API"
 RUN dotnet build "./FarmHand.API.csproj" -c $BUILD_CONFIGURATION -o /app/build
@@ -30,6 +34,11 @@ RUN dotnet publish "./FarmHand.API.csproj" -c $BUILD_CONFIGURATION -o /app/publi
 
 # This stage is used in production or when running from VS in regular mode (Default when not using the Debug configuration)
 FROM base AS final
+USER root
+RUN mkdir -p /data/uploads && chown -R app:app /data
+USER app
 WORKDIR /app
 COPY --from=publish /app/publish .
+ENV ASPNETCORE_HTTP_PORTS=8080
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 CMD ["dotnet", "FarmHand.API.dll", "--check-health"]
 ENTRYPOINT ["dotnet", "FarmHand.API.dll"]

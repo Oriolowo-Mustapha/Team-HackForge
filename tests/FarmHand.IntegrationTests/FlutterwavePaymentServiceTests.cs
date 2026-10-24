@@ -1,4 +1,5 @@
 using FarmHand.Infrastructure.Payments;
+using FarmHand.Application.Common.Interfaces;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -39,9 +40,11 @@ public class FlutterwavePaymentServiceTests
         var service = CreateService("integration-test-signing-secret");
         var initiated = await service.InitiatePaymentAsync(Guid.NewGuid(), 1500, "NGN", "farmer@example.com");
 
-        var verified = await service.VerifyPaymentAsync(initiated.TransactionReference!);
+        var verified = await service.VerifyByReferenceAsync(initiated.TransactionReference!);
 
-        Assert.True(verified.Success);
+        Assert.Equal(PaymentVerificationOutcome.Successful, verified.Outcome);
+        Assert.Null(verified.Amount);
+        Assert.Null(verified.Currency);
     }
 
     [Fact]
@@ -51,9 +54,9 @@ public class FlutterwavePaymentServiceTests
         var verifier = CreateService("a-completely-different-secret");
         var initiated = await issuer.InitiatePaymentAsync(Guid.NewGuid(), 1500, "NGN", "farmer@example.com");
 
-        var verified = await verifier.VerifyPaymentAsync(initiated.TransactionReference!);
+        var verified = await verifier.VerifyByReferenceAsync(initiated.TransactionReference!);
 
-        Assert.False(verified.Success);
+        Assert.NotEqual(PaymentVerificationOutcome.Successful, verified.Outcome);
     }
 
     [Fact]
@@ -64,9 +67,9 @@ public class FlutterwavePaymentServiceTests
         var reference = initiated.TransactionReference!;
         var tampered = reference[..^1] + (reference[^1] == 'a' ? 'b' : 'a');
 
-        var verified = await service.VerifyPaymentAsync(tampered);
+        var verified = await service.VerifyByReferenceAsync(tampered);
 
-        Assert.False(verified.Success);
+        Assert.NotEqual(PaymentVerificationOutcome.Successful, verified.Outcome);
     }
 
     [Fact]

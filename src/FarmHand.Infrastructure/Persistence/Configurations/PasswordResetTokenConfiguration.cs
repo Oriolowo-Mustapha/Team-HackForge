@@ -10,6 +10,7 @@ public class PasswordResetTokenConfiguration : IEntityTypeConfiguration<Password
     {
         builder.HasKey(x => x.Id);
         builder.Property(x => x.TokenHash).IsRequired().HasMaxLength(128);
+        builder.Property(x => x.UsedAt).IsConcurrencyToken();
         builder.HasIndex(x => x.TokenHash).IsUnique();
         builder.HasIndex(x => x.UserId);
 

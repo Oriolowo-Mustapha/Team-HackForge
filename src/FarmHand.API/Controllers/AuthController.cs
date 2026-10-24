@@ -14,7 +14,6 @@ namespace FarmHand.API.Controllers;
 
 [ApiController]
 [Route("api/auth")]
-[EnableRateLimiting("auth")]
 public class AuthController : ControllerBase
 {
     private static readonly string DummyPasswordHash = BCrypt.Net.BCrypt.HashPassword("farmhand-timing-equalizer");
@@ -55,6 +54,7 @@ public class AuthController : ControllerBase
     /// <response code="400">Validation failed or email already registered.</response>
     /// <response code="429">Too many attempts.</response>
     [HttpPost("register")]
+    [EnableRateLimiting("auth")]
     [AllowAnonymous]
     [ProducesResponseType(StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -104,6 +104,7 @@ public class AuthController : ControllerBase
     /// <response code="401">Invalid email or password, or the account is inactive.</response>
     /// <response code="429">Too many attempts.</response>
     [HttpPost("login")]
+    [EnableRateLimiting("auth")]
     [AllowAnonymous]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
@@ -133,6 +134,7 @@ public class AuthController : ControllerBase
     /// <response code="200">New tokens issued.</response>
     /// <response code="401">Refresh token invalid, expired, revoked, or already used.</response>
     [HttpPost("refresh")]
+    [EnableRateLimiting("sessions")]
     [AllowAnonymous]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
@@ -281,6 +283,7 @@ public class AuthController : ControllerBase
     /// the link is written to the server log instead (never returned in the response).
     /// </remarks>
     [HttpPost("forgot-password")]
+    [EnableRateLimiting("auth")]
     [AllowAnonymous]
     [ProducesResponseType(StatusCodes.Status202Accepted)]
     public async Task<IActionResult> ForgotPassword([FromBody] ForgotPasswordRequest request, CancellationToken ct)
@@ -324,6 +327,7 @@ public class AuthController : ControllerBase
     /// <response code="200">Password reset.</response>
     /// <response code="400">The token is invalid or expired, or the password is invalid.</response>
     [HttpPost("reset-password")]
+    [EnableRateLimiting("auth")]
     [AllowAnonymous]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]

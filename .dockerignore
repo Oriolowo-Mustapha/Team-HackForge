@@ -17,6 +17,14 @@
 **/docker-compose*
 **/Dockerfile*
 **/node_modules
+**/.next
+**/.env.*
+**/appsettings.Development.json
+**/appsettings.json
+**/TestResults
+**/test-results
+**/playwright-report
+.agoya
 **/npm-debug.log
 **/obj
 **/secrets.dev.yaml
@@ -24,7 +32,3 @@
 LICENSE
 README.md
 !**/.gitignore
-!.git/HEAD
-!.git/config
-!.git/packed-refs
-!.git/refs/heads/**
