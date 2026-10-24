@@ -500,12 +500,17 @@ test("GPS locations accept zero coordinates and survive a farm-name edit", async
 
 async function storedDrafts(page: Page) {
   return page.evaluate(async () => {
-    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+    // Observing a draft must not create an empty database before the application initializes its store.
+    if (!(await indexedDB.databases()).some((database) => database.name === "farmhand")) return [];
+    const db = await new Promise<IDBDatabase | null>((resolve, reject) => {
       const request = indexedDB.open("farmhand");
+      request.onupgradeneeded = () => { request.transaction?.abort(); resolve(null); };
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });
+    if (!db) return [];
     try {
+      if (!db.objectStoreNames.contains("report-drafts")) return [];
       const rows = await new Promise<Array<{ id: string; farmId: string; text: string; createdAt: number; idempotencyKey: string }>>((resolve, reject) => {
         const request = db.transaction("report-drafts").objectStore("report-drafts").getAll();
         request.onsuccess = () => resolve(request.result);
@@ -531,7 +536,7 @@ test("farmer and vet finish the clinical workflow through the interface", async 
     const page = await farmerContext.newPage();
     await page.goto(`/scan?group=${group.id}`);
     await page.getByRole("tab", { name: "Text", exact: true }).click();
-    await page.getByLabel("Describe what you see", { exact: true }).fill("Several birds are weak and eating less since yesterday.");
+    await page.getByLabel("Describe what you see", { exact: true }).fill("Several birds are gasping, weak and eating less since yesterday. Three died suddenly.");
     await page.getByRole("button", { name: "Flock numbers today", exact: false }).click();
     await page.getByLabel("Deaths", { exact: true }).fill("3");
     await page.getByLabel("Feed", { exact: true }).fill("reduced to one bag");
@@ -542,9 +547,9 @@ test("farmer and vet finish the clinical workflow through the interface", async 
     const submitted = await (await submission).json();
     await expect(page).toHaveURL(new RegExp(`/reports/${submitted.id}`));
     await expect(page.getByLabel("Deaths", { exact: true })).toHaveValue("3");
-    await expect(page.getByLabel("Feed", { exact: true })).toHaveValue("reduced to one bag");
-    await expect(page.getByLabel("Water", { exact: true })).toHaveValue("half the usual amount");
-    await expect(page.getByLabel("Eggs", { exact: true })).toHaveValue("12");
+    await expect(page.getByRole("textbox", { name: "Feed Optional", exact: true })).toHaveValue("reduced to one bag");
+    await expect(page.getByRole("textbox", { name: "Water Optional", exact: true })).toHaveValue("half the usual amount");
+    await expect(page.getByRole("textbox", { name: "Eggs Optional", exact: true })).toHaveValue("12");
     await expect(page.getByText("Original report text", { exact: true })).toBeVisible();
 
     // Exercise the actual Listen control without calling a paid provider.
@@ -558,6 +563,8 @@ test("farmer and vet finish the clinical workflow through the interface", async 
     await page.getByRole("button", { name: "Confirm report", exact: true }).click();
     await expect(page.getByText("Report confirmed", { exact: true })).toBeVisible();
     await expect(page.getByText(/This is a triage suggestion, not a diagnosis/)).toBeVisible();
+    await expect(page.getByText(/^(High|Critical) ·/)).toBeVisible();
+    await expect(page.getByText("Case opened", { exact: true })).toBeVisible();
     await page.getByRole("link", { name: "Ask a vet", exact: true }).click();
     await expect(page).toHaveURL(/\/cases\/[^?]+\?request=1$/);
     const incidentId = new URL(page.url()).pathname.split("/").at(-1)!;
@@ -593,7 +600,7 @@ test("farmer and vet finish the clinical workflow through the interface", async 
     await planDialog.getByLabel("Step 1", { exact: true }).fill("Review water intake tomorrow");
     await planDialog.getByRole("button", { name: "Share plan", exact: true }).click();
     await expect(planDialog).toBeHidden();
-    await doctor.getByLabel("Consultation notes or reason", { exact: true }).fill("Remote review completed; follow the plan and contact me if signs worsen.");
+    await doctor.getByRole("textbox", { name: "Consultation notes or reason Optional", exact: true }).fill("Remote review completed; follow the plan and contact me if signs worsen.");
     await doctor.getByRole("button", { name: "Complete consultation", exact: true }).click();
     await doctor.getByRole("dialog").getByRole("button", { name: "Confirm", exact: true }).click();
     await expect(doctor.getByRole("dialog")).toBeHidden();
@@ -656,6 +663,7 @@ test("offline drafts return to their original farm and explicit zero survives an
     const report = await (await response).json();
     expect(report.farmId).toBe(farmId);
     expect(report.mortalityCount).toBe(0);
+    await expect(page).toHaveURL(new RegExp(`/reports/${report.id}`));
     await page.reload();
     await expect(page.getByLabel("Deaths", { exact: true })).toHaveValue("0");
     const repeated = await farmer.post("/api/bff/observations", { multipart: { farmId, livestockCategoryId: groups[0].id, text: revisedNote, mortalityCount: "0", idempotencyKey: draft.idempotencyKey } });
@@ -675,13 +683,13 @@ test("blocked device storage is visible and closing preserves the unsaved form",
     await page.goto(`/scan?group=${groups[0].id}`);
     await page.getByRole("tab", { name: "Text", exact: true }).click();
     await page.getByLabel("Describe what you see", { exact: true }).fill("Keep this unsaved note visible.");
-    await expect(page.getByRole("alert")).toContainText("This device could not save your draft");
+    await expect(page.getByRole("region", { name: "Your report", exact: true }).getByRole("alert")).toContainText("This device could not save your draft");
     await page.getByRole("button", { name: "Close", exact: true }).click();
     await expect(page).toHaveURL(/\/scan\?/);
     await expect(page.getByLabel("Describe what you see", { exact: true })).toHaveValue("Keep this unsaved note visible.");
     await context.setOffline(true);
     await page.getByRole("button", { name: "Save for later", exact: true }).click();
-    await expect(page.getByRole("alert")).toContainText("This device could not save your draft");
+    await expect(page.getByRole("region", { name: "Your report", exact: true }).getByRole("alert")).toContainText("This device could not save your draft");
     await expect(page.getByText("Saved on this device", { exact: true })).toHaveCount(0);
   } finally { await context.setOffline(false); await context.close(); await farmer.dispose(); }
 });
@@ -745,7 +753,7 @@ test("another account cannot read drafts when device cleanup fails transiently",
     // Storage is readable again, and the old row remains: privacy must come from ownership checks.
     expect((await storedDrafts(page)).some((row) => row.id === draft.id)).toBe(true);
     await page.goto(`/scan?draft=${draft.id}`);
-    await expect(page.getByRole("alert")).toContainText("This draft is no longer on this device");
+    await expect(page.locator('[role="alert"]:not(#__next-route-announcer__)')).toContainText("This draft is no longer on this device");
     await expect(page.locator("body")).not.toContainText(privateNote);
     await page.goto("/scan?drafts=1");
     await expect(page.getByRole("dialog", { name: "Unsent reports", exact: true })).toContainText("No unsent reports");
