@@ -1,5 +1,5 @@
 /* Cache only the public offline page and immutable app assets. Never cache farm data or API responses. */
-const VERSION = "farmhand-offline-v1";
+const VERSION = "farmhand-offline-v2";
 const OFFLINE = "/offline";
 self.addEventListener("install", (event) => {
   event.waitUntil(
