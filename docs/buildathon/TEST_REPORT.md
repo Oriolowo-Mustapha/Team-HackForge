@@ -62,7 +62,9 @@ At **2026-10-24 09:48 UTC**, a read-only [public readiness request](https://team
 
 The final read-only recheck at **2026-10-24 16:50:39 UTC** still returned HTTP 503 with the same unavailable response. Local success does not close this production gate.
 
-For baseline `f3da02e`, [Actions run 40077309842](https://github.com/Oriolowo-Mustapha/Team-HackForge/actions/runs/40077309842) reported: the account was locked due to billing. Full-stack executed **zero steps**, containers were skipped. This is an external infrastructure restriction, not an executed application-test failure. Candidate PR CI status is recorded with the final review link when available.
+For baseline `f3da02e`, [Actions run 40077309842](https://github.com/Oriolowo-Mustapha/Team-HackForge/actions/runs/40077309842) reported: the account was locked due to billing. Full-stack executed **zero steps**, containers were skipped. This is an external infrastructure restriction, not an executed application-test failure.
+
+The changes are pushed in [draft PR #3](https://github.com/Oriolowo-Mustapha/Team-HackForge/pull/3). Candidate `a1cc58d05758d18ef2057f293756ccb6a7d6b5c6` produced [Actions run 40113703254](https://github.com/Oriolowo-Mustapha/Team-HackForge/actions/runs/40113703254); its full-stack annotation again confirms the job **was not started because of the account billing lock**, and containers were skipped. GitGuardian's check passed for those eight commits with no secrets detected. These hosted metadata checks do not replace the unavailable Linux test/container execution. Later report-only commits do not change the tested application.
 
 ## Remaining verification gates
 
