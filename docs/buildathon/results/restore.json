@@ -1,0 +1,26 @@
+{
+  "VerifiedAtUtc": "2026-10-24T11:56:36.2394726Z",
+  "SourceDatabase": "farmhand",
+  "RestoredDatabase": "farmhand_restore_20261024_buildathon",
+  "TablesCompared": 15,
+  "RowCounts": [
+    "Farms|7",
+    "LivestockCategories|9",
+    "LivestockAnimals|5",
+    "PoultryObservations|23",
+    "Incidents|9",
+    "VetRequests|7",
+    "Payments|6",
+    "TreatmentPlans|6",
+    "TreatmentScheduleItems|8",
+    "Users|13",
+    "RefreshTokens|55",
+    "PasswordResetTokens|0",
+    "AIDiagnoses|22",
+    "AuditEvents|119",
+    "__EFMigrationsHistory|13"
+  ],
+  "BackupBytes": 79638,
+  "Result": "Restore succeeded; all selected row counts match.",
+  "Limitation": "Quiescent local synthetic data only; no application startup, content hash or production recovery-time guarantee."
+}

@@ -14,7 +14,21 @@ Edit `.env` and set `PUBLIC_HOST`, `BREVO_API_KEY`, and a verified `BREVO_FROM_A
 
 Payments default to `Disabled`. To enable actual charges, set `PAYMENTS_MODE=Live`, `FLUTTERWAVE_SECRET_KEY`, and `FLUTTERWAVE_WEBHOOK_SECRET`. Register `https://YOUR_DOMAIN/api/payments/webhook` with Flutterwave. Caddy routes this endpoint directly to the private API, which checks signatures and independently verifies transactions, amount, and currency. Verify a real provider sandbox transaction before switching to live credentials.
 
-Set Gemini/Groq and Spitch/transcription provider keys to enable AI and voice services. An unconfigured production AI provider returns an explicit unavailable response; the manual reporting workflow remains available. Demo rule-based analysis is disabled in Production. Local image storage uses the persistent `uploads` volume; deployments using Cloudinary can override the storage settings.
+Set Gemini/Groq and Spitch/transcription provider keys to enable AI and voice services. Unavailable production text extraction returns an explicit unavailable response; the manual reporting workflow remains available. Demo rule-based extraction is disabled in Production. Confirmation can still use explicitly labelled deterministic urgency rules, and approved care wording is server-controlled. This is preliminary, clinically unvalidated guidance, not a successful live model call. Production requires explicit `Storage:Provider=Local` and `Storage:LocalPath`; `Auto` and `Cloudinary` are rejected. The supplied stack mounts persistent `uploads` storage. Verify persistence and filesystem permissions on your actual host: a configured path alone does not prove either. Optional non-Production Cloudinary uploads use public delivery URLs; private cloud delivery remains unimplemented.
+
+## Existing-database migration preflight
+
+Back up the database and upload volume before applying new migrations. The buildathon release adds `IX_VetRequests_OneActivePerIncident`, a filtered unique index for non-deleted requests whose status is Pending (`0`) or Responded (`1`). A fresh database needs no data repair. On an existing database, run this read-only query before starting the migration service:
+
+```sql
+SELECT "IncidentId", COUNT(*) AS "ActiveRequestCount"
+FROM "VetRequests"
+WHERE "Status" IN (0, 1) AND "IsDeleted" = FALSE
+GROUP BY "IncidentId"
+HAVING COUNT(*) > 1;
+```
+
+If rows are returned, stop the release and have the data owner review the competing requests, assigned vets and payment reconciliation. Preserve clinical/payment history. Do not automatically delete records or invent a winning assignment. Resolve duplicates through an explicitly reviewed data change, rerun the query, then apply the migration. The migration fails with an explanatory error while duplicates remain; it does not deduplicate data. Run only one migration job per database.
 
 ## First deployment
 
@@ -49,7 +63,14 @@ On PowerShell, set the corresponding `$env:AdminBootstrap__Email` and `$env:Admi
 
 - Persist and back up both database and upload volumes. Do not use `docker compose down -v` on a production host unless the data is intentionally being destroyed.
 - Monitor container health, API error rates, email delivery, AI-provider failures, and webhook verification. Logs omit credentials and raw account numbers; restrict access to logs and diagnostics.
+- Readiness checks cover the database/schema, not real provider delivery. Integration configuration flags are not provider health probes. Define a real alert destination for repeated 503s, error-rate/latency changes, failed recovery email, provider errors and failed backups; the repository does not provision hosted alerting.
 - The Compose stack uses one web replica. Token refresh coalescing is process-local; implement distributed refresh coordination before scaling the web service to multiple replicas.
 - The private proxy network is `172.30.50.0/24` by default. Set `NETWORK_SUBNET` if it conflicts with your host network. Only that internal proxy network is trusted for forwarded client addresses. If another load balancer is added in front of Caddy, configure its trusted-proxy handling deliberately.
 - Keep .NET, Node, PostgreSQL, container images, and locked dependencies patched. NuGet high/critical audit findings fail restore; npm production auditing runs in CI.
 - Run a restore drill and the provider/email checks with your own infrastructure before a public launch. Passing local tests does not verify real provider credentials, DNS, certificates, backups, or payment settlement.
+
+## Public deployment gate observed during buildathon review
+
+At `2026-10-24 09:48 UTC`, `GET https://team-hack-forge.vercel.app/api/health` returned HTTP 503 with `status: unavailable`, while the landing page rendered. The public check did not reveal whether the cause was API configuration/reachability, database, pending migrations or another service condition. Inspect the authorized hosting environment's `FARMHAND_API_URL`, API readiness and private logs to determine the cause. Do not publish secrets or assume the reference Compose topology describes Vercel's backend. No deployment or production-data change is authorized by this observation. Recheck public and protected workflows after an explicitly authorized deployment fix.
+
+See [buildathon verification](docs/buildathon/TEST_REPORT.md) for actual local, CI, benchmark and recovery evidence. For baseline `f3da02e`, GitHub Actions run `40077309842` did not start the full-stack job because the account was locked for billing; container checks were skipped. Resolve that account restriction or run equivalent checks on an authorized Docker-enabled host before calling the release verified.
