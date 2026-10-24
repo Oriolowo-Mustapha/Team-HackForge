@@ -156,7 +156,9 @@ test("new farmer registration and first-farm setup", async ({ page }) => {
   await page
     .getByLabel("Farm name", { exact: true })
     .fill("Workflow Test Farm");
-  await page.getByLabel("Location", { exact: true }).fill("Lagos, Nigeria");
+  await page.getByRole("radio", { name: "Type manually", exact: true }).click();
+  await page.getByLabel("Town or City / LGA", { exact: true }).fill("Lagos");
+  await page.getByLabel("State", { exact: true }).selectOption("Lagos");
   await page.getByRole("button", { name: "Continue", exact: true }).click();
   await page.getByRole("radio", { name: "Layers", exact: true }).click();
   await page.getByLabel("Group name", { exact: true }).fill("Test flock");
@@ -445,4 +447,31 @@ test("farmer dashboard fits a phone and exposes mobile navigation", async ({
     await context.close();
     await farmer.dispose();
   }
+});
+
+test("GPS locations accept zero coordinates and survive a farm-name edit", async ({ playwright, browser }) => {
+  const farmer = await loginApi(playwright, "farmer@farmhand.ai");
+  const context = await browser.newContext({ baseURL, storageState: await farmer.storageState(), geolocation: { latitude: 0, longitude: 0 }, permissions: ["geolocation"] });
+  const farmName = `GPS regression ${Date.now()}`;
+  try {
+    expect((await farmer.post("/api/bff/farms", { data: { displayName: "Invalid coordinate pair", location: "Test", latitude: 1 } })).status()).toBe(400);
+    await context.route("https://nominatim.openstreetmap.org/**", (route) => route.fulfill({ json: { address: { city: "Lagos", state: "Lagos", country: "Nigeria" } } }));
+    const page = await context.newPage();
+    await page.goto("/setup?another=1");
+    await page.getByLabel("Farm name", { exact: true }).fill(farmName);
+    await page.getByRole("button", { name: "Detect My Location", exact: true }).click();
+    await expect(page.getByText("GPS Location Locked", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Continue", exact: true }).click();
+    await page.getByRole("button", { name: "Skip for now", exact: true }).click();
+    await expect(page).toHaveURL(/\/home$/);
+    await page.goto("/profile");
+    await page.getByLabel("Farm name", { exact: true }).fill(`${farmName} renamed`);
+    await page.getByRole("button", { name: "Save farm", exact: true }).click();
+    await expect(page.getByText("Farm details saved", { exact: true })).toBeVisible();
+    const farms = await json(farmer, "farms");
+    const saved = farms.find((farm: { displayName: string }) => farm.displayName === `${farmName} renamed`);
+    expect(saved.latitude).toBe(0);
+    expect(saved.longitude).toBe(0);
+    expect(saved.locationSource).toBe("device_gps");
+  } finally { await context.close(); await farmer.dispose(); }
 });

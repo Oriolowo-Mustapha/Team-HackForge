@@ -14,7 +14,7 @@ Edit `.env` and set `PUBLIC_HOST`, `BREVO_API_KEY`, and a verified `BREVO_FROM_A
 
 Payments default to `Disabled`. To enable actual charges, set `PAYMENTS_MODE=Live`, `FLUTTERWAVE_SECRET_KEY`, and `FLUTTERWAVE_WEBHOOK_SECRET`. Register `https://YOUR_DOMAIN/api/payments/webhook` with Flutterwave. Caddy routes this endpoint directly to the private API, which checks signatures and independently verifies transactions, amount, and currency. Verify a real provider sandbox transaction before switching to live credentials.
 
-Set Gemini/Groq and transcription provider keys to enable AI and voice services. An unconfigured production AI provider returns an explicit unavailable response; the manual reporting workflow remains available. Demo rule-based analysis is disabled in Production. Local image storage uses the persistent `uploads` volume; deployments using Cloudinary can override the storage settings.
+Set Gemini/Groq and Spitch/transcription provider keys to enable AI and voice services. An unconfigured production AI provider returns an explicit unavailable response; the manual reporting workflow remains available. Demo rule-based analysis is disabled in Production. Local image storage uses the persistent `uploads` volume; deployments using Cloudinary can override the storage settings.
 
 ## First deployment
 

@@ -24,6 +24,7 @@ x-api-env: &api-env
   Gemini__ApiKey: ${GEMINI_API_KEY:-}
   Groq__ApiKey: ${GROQ_API_KEY:-}
   YarnGpt__ApiKey: ${YARNGPT_API_KEY:-}
+  Spitch__ApiKey: ${SPITCH_API_KEY:-}
 services:
   edge:
     image: caddy:2

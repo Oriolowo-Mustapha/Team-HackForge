@@ -20,6 +20,7 @@ const values = {
   GEMINI_API_KEY: "",
   GROQ_API_KEY: "",
   YARNGPT_API_KEY: "",
+  SPITCH_API_KEY: "",
 };
 await writeFile(target, Object.entries(values).map(([key, value]) => `${key}=${value}`).join("\n") + "\n", { flag: "wx", mode: 0o600 });
 console.log(`Created ${fileURLToPath(target)} with unique local secrets. Keep it private and backed up.`);

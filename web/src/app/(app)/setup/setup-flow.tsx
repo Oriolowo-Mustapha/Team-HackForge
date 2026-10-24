@@ -14,7 +14,7 @@ import { useSession } from "@/lib/hooks/use-session";
 import { qk } from "@/lib/queries";
 import { BrandMark } from "@/components/shell/brand";
 import { Button } from "@/components/ui/button";
-import { ChoiceChips, Field, Input } from "@/components/ui/field";
+import { ChoiceChips, Field, Input, Select } from "@/components/ui/field";
 import { Segmented } from "@/components/ui/segmented";
 import { InlineError } from "@/components/ui/states";
 
@@ -84,7 +84,7 @@ export function SetupFlow({ another }: { another: boolean }) {
         try {
           const res = await fetch(
             `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=14&addressdetails=1`,
-            { headers: { "Accept-Language": "en" } }
+            { headers: { "Accept-Language": "en" }, signal: AbortSignal.timeout(10000) }
           );
           if (!res.ok) throw new Error("Reverse geocode request failed");
           const data = await res.json();
@@ -132,7 +132,7 @@ export function SetupFlow({ another }: { another: boolean }) {
 
   function handleManualChange(field: "cityOrTown" | "state" | "location", val: string) {
     setFarmForm((prev) => {
-      const next = { ...prev, [field]: val, locationSource: "manual" };
+      const next = { ...prev, [field]: val, latitude: null, longitude: null, locationSource: "manual" };
       if (field === "cityOrTown" || field === "state") {
         const parts = [next.cityOrTown.trim(), next.state.trim(), next.country].filter(Boolean);
         next.location = parts.join(", ");
@@ -146,6 +146,7 @@ export function SetupFlow({ another }: { another: boolean }) {
     const found: Record<string, string> = {};
     if (farm.name.trim().length < 2) found.name = "Give your farm a name.";
     if (farm.location.trim().length < 2) found.location = "Add a location or use GPS so vets know where you are.";
+    if (locationMode === "gps" && (farm.latitude === null || farm.longitude === null)) found.location = "Detect your location or choose Type manually.";
     setErrors(found);
     if (Object.keys(found).length) return;
     setPending(true);
@@ -159,7 +160,7 @@ export function SetupFlow({ another }: { another: boolean }) {
         cityOrTown: farm.cityOrTown || null,
         state: farm.state || null,
         country: farm.country || "Nigeria",
-        locationSource: farm.locationSource || (farm.latitude ? "device_gps" : "manual"),
+        locationSource: farm.locationSource || (farm.latitude !== null ? "device_gps" : "manual"),
       });
       setFarmId(id);
       setFarm(id);
@@ -249,7 +250,10 @@ export function SetupFlow({ another }: { another: boolean }) {
                 <Segmented
                   label="Location mode"
                   value={locationMode}
-                  onChange={(m) => setLocationMode(m as "gps" | "manual")}
+                  onChange={(m) => {
+                    setLocationMode(m as "gps" | "manual");
+                    if (m === "manual") setFarmForm((previous) => ({ ...previous, latitude: null, longitude: null, locationSource: "manual" }));
+                  }}
                   options={[
                     { value: "gps", label: "Auto-detect (GPS)" },
                     { value: "manual", label: "Type manually" },
@@ -258,7 +262,7 @@ export function SetupFlow({ another }: { another: boolean }) {
 
                 {locationMode === "gps" ? (
                   <div className="space-y-2">
-                    {farm.latitude && farm.longitude ? (
+                    {farm.latitude !== null && farm.longitude !== null ? (
                       <div className="rounded-2xl border border-green-ink/20 bg-green-ink/5 p-4 space-y-2">
                         <div className="flex items-start justify-between gap-3">
                           <div className="flex items-center gap-2 text-green-ink font-semibold text-sm">
@@ -288,7 +292,7 @@ export function SetupFlow({ another }: { another: boolean }) {
                         </div>
                         <div>
                           <p className="text-sm font-semibold">Get current device location</p>
-                          <p className="text-xs text-muted mt-0.5">Captures your precise coordinates and resolves your town and state automatically.</p>
+                          <p className="text-xs text-muted mt-0.5">Uses your device coordinates to find your town and state. Choosing this sends the coordinates to OpenStreetMap; you can type your location manually instead.</p>
                         </div>
                         <Button
                           type="button"
@@ -324,8 +328,7 @@ export function SetupFlow({ another }: { another: boolean }) {
                       />
                     </Field>
                     <Field label="State" hint="Select your state">
-                      <div className="relative">
-                        <select
+                        <Select
                           value={farm.state}
                           onChange={(e) => handleManualChange("state", e.target.value)}
                           className="w-full h-12 rounded-2xl border border-line bg-paper px-4 text-sm font-medium text-ink focus:outline-none focus:ring-2 focus:ring-ink"
@@ -334,8 +337,7 @@ export function SetupFlow({ another }: { another: boolean }) {
                           {NIGERIAN_STATES.map((s) => (
                             <option key={s} value={s}>{s}</option>
                           ))}
-                        </select>
-                      </div>
+                        </Select>
                     </Field>
                     <Field label="Full Location Summary" hint="Formatted address stored in records" error={errors.location}>
                       <Input

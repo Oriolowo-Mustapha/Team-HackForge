@@ -95,6 +95,7 @@ public class UpdateFarmCommandValidator : AbstractValidator<UpdateFarmCommand>
         RuleFor(x => x.Location).NotEmpty().MaximumLength(300);
         RuleFor(x => x.Latitude).InclusiveBetween(-90, 90).When(x => x.Latitude.HasValue);
         RuleFor(x => x.Longitude).InclusiveBetween(-180, 180).When(x => x.Longitude.HasValue);
+        RuleFor(x => x).Must(x => x.Latitude.HasValue == x.Longitude.HasValue).WithMessage("Provide both latitude and longitude, or neither.");
         RuleFor(x => x.CityOrTown).MaximumLength(100);
         RuleFor(x => x.State).MaximumLength(100);
         RuleFor(x => x.Country).MaximumLength(100);

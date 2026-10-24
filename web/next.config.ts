@@ -5,7 +5,7 @@ const securityHeaders = [
   { key: "X-Frame-Options", value: "DENY" },
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
   // Camera and microphone are used by the health scanner on this origin only.
-  { key: "Permissions-Policy", value: "camera=(self), microphone=(self), geolocation=()" },
+  { key: "Permissions-Policy", value: "camera=(self), microphone=(self), geolocation=(self)" },
   { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
 ];
 

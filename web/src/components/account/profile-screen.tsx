@@ -1,10 +1,10 @@
 "use client";
 
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { toast } from "sonner";
 import { authApi, farmsApi } from "@/lib/api/endpoints";
-import type { SessionUser } from "@/lib/api/schemas";
+import type { FarmSummary, SessionUser } from "@/lib/api/schemas";
 import { useActiveFarm } from "@/lib/hooks/use-active-farm";
 import { useSession } from "@/lib/hooks/use-session";
 import { useSignOut } from "@/lib/hooks/use-sign-out";
@@ -12,7 +12,7 @@ import { qk } from "@/lib/queries";
 import { Button, ButtonLink } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/field";
 import { PageHeader } from "@/components/ui/page-header";
-import { Panel } from "@/components/ui/resource-panel";
+import { Panel, ResourcePanel } from "@/components/ui/resource-panel";
 import { InlineError } from "@/components/ui/states";
 
 function ProfileForm({ user }: { user: SessionUser }) {
@@ -66,25 +66,31 @@ function ProfileForm({ user }: { user: SessionUser }) {
   );
 }
 
-function FarmForm({
-  id,
-  name: initialName,
-  location: initialLocation,
-}: {
-  id: string;
-  name: string;
-  location: string;
-}) {
+function FarmForm({ farm }: { farm: FarmSummary }) {
+  const { id, displayName: initialName, location: initialLocation } = farm;
   const client = useQueryClient();
   const [name, setName] = useState(initialName);
   const [location, setLocation] = useState(initialLocation);
   const save = useMutation({
-    mutationFn: () => farmsApi.update(id, name.trim(), location.trim()),
+    mutationFn: () => {
+      const changedAddress = location.trim() !== initialLocation;
+      return farmsApi.update(id, {
+        displayName: name.trim(),
+        location: location.trim(),
+        latitude: changedAddress ? null : farm.latitude,
+        longitude: changedAddress ? null : farm.longitude,
+        cityOrTown: changedAddress ? null : farm.cityOrTown,
+        state: changedAddress ? null : farm.state,
+        country: farm.country,
+        locationSource: changedAddress ? "manual" : farm.locationSource,
+      });
+    },
     onSuccess: async () => {
       await Promise.all([
         client.invalidateQueries({ queryKey: qk.session }),
         client.invalidateQueries({ queryKey: qk.farms }),
         client.invalidateQueries({ queryKey: qk.overview(id) }),
+        client.invalidateQueries({ queryKey: ["farm-details", id] }),
       ]);
       toast.success("Farm details saved");
     },
@@ -106,7 +112,10 @@ function FarmForm({
           onChange={(e) => setName(e.target.value)}
         />
       </Field>
-      <Field label="Location">
+      <Field
+        label="Location"
+        hint="Editing the address switches it to manual entry and clears saved GPS coordinates."
+      >
         <Input
           required
           maxLength={300}
@@ -125,6 +134,11 @@ function FarmForm({
 export function ProfileScreen() {
   const { user } = useSession();
   const { farm } = useActiveFarm();
+  const farmDetails = useQuery({
+    queryKey: ["farm-details", farm?.id],
+    queryFn: () => farmsApi.get(farm!.id),
+    enabled: user?.role === "Farmer" && Boolean(farm),
+  });
   const { signOut, pending } = useSignOut();
   if (!user) return null;
   return (
@@ -138,12 +152,9 @@ export function ProfileScreen() {
       </Panel>
       {user.role === "Farmer" && farm && (
         <Panel title="Current farm">
-          <FarmForm
-            key={farm.id}
-            id={farm.id}
-            name={farm.displayName}
-            location={farm.location}
-          />
+          <ResourcePanel query={farmDetails}>
+            {(details) => <FarmForm key={details.id} farm={details} />}
+          </ResourcePanel>
           <ButtonLink href="/setup?another=1" variant="ghost" className="mt-3">
             Add another farm
           </ButtonLink>

@@ -13,11 +13,15 @@ FarmHand can now run as a complete local stack. Sign-in reaches the real API and
 
 ## Local verification
 
-- 40 backend tests passed, including a real PostgreSQL reset-token race regression.
+- 42 backend tests passed, including a real PostgreSQL reset-token race regression.
 - 3 request-body limit tests passed.
-- 9 Playwright tests passed against the real .NET API/PostgreSQL stack: all role navigation, registration/farm setup, cross-farm access, CSRF, competing acceptance, amount tampering, payment UI and idempotency, treatment plans, onboarding/deactivation, offline loading, and phone layout.
+- 10 Playwright tests passed against the real .NET API/PostgreSQL stack: all role navigation, registration/farm setup, cross-farm access, CSRF, competing acceptance, amount tampering, payment UI and idempotency, treatment plans, onboarding/deactivation, offline loading, and phone layout.
 - TypeScript, ESLint, and production web build passed. npm production audit reports zero known vulnerabilities.
 
 ## Deployment requirements
 
 Production intentionally refuses demo accounts, simulated payments, weak/missing keys, wildcard hosts, and missing recovery-email configuration. Supply the real domain and provider credentials, verify email delivery and provider settlement, and perform a backup/restore drill in the target environment before public launch. The supplied deployment uses one web replica; distributed refresh coordination is needed before horizontal scaling.
+
+## Integration and CI status
+
+Integrated the latest Spitch audio and dual GPS/manual location update from master. Preserved location metadata when editing a farm name, enabled same-origin GPS permissions, bounded reverse-geocoding waits, and sanitized provider error output. Both Compose files and the Caddy configuration validate locally. GitHub Actions could not start because the account is locked by a billing issue; container builds still require CI or a Docker-enabled host.
