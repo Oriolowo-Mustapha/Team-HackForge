@@ -74,7 +74,16 @@ public class FarmsController : ControllerBase
     [HttpPut("{farmId:guid}")]
     [ProducesResponseType(typeof(FarmSummaryDto), StatusCodes.Status200OK)]
     public async Task<IActionResult> Update(Guid farmId, [FromBody] UpdateFarmRequest request, CancellationToken ct) =>
-        Ok(await _mediator.Send(new UpdateFarmCommand(farmId, request.DisplayName, request.Location), ct));
+        Ok(await _mediator.Send(new UpdateFarmCommand(
+            farmId,
+            request.DisplayName,
+            request.Location,
+            request.Latitude,
+            request.Longitude,
+            request.CityOrTown,
+            request.State,
+            request.Country,
+            request.LocationSource), ct));
 
     /// <summary>Farmer home dashboard: counts, cases needing attention, reminders, recent activity and the next best action.</summary>
     [HttpGet("{farmId:guid}/overview")]
@@ -83,4 +92,12 @@ public class FarmsController : ControllerBase
         Ok(await _mediator.Send(new GetFarmOverviewQuery(farmId), ct));
 }
 
-public record UpdateFarmRequest(string DisplayName, string Location);
+public record UpdateFarmRequest(
+    string DisplayName,
+    string Location,
+    double? Latitude = null,
+    double? Longitude = null,
+    string? CityOrTown = null,
+    string? State = null,
+    string? Country = null,
+    string? LocationSource = null);

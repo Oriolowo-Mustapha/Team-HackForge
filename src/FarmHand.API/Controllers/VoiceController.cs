@@ -15,12 +15,18 @@ namespace FarmHand.API.Controllers;
 public class VoiceController : ControllerBase
 {
     private readonly IMediator _mediator;
+    private readonly SpitchService _spitch;
     private readonly YarnGptService _yarnGpt;
     private readonly ILogger<VoiceController> _logger;
 
-    public VoiceController(IMediator mediator, YarnGptService yarnGpt, ILogger<VoiceController> logger)
+    public VoiceController(
+        IMediator mediator,
+        SpitchService spitch,
+        YarnGptService yarnGpt,
+        ILogger<VoiceController> logger)
     {
         _mediator = mediator;
+        _spitch = spitch;
         _yarnGpt = yarnGpt;
         _logger = logger;
     }
@@ -95,7 +101,7 @@ public class VoiceController : ControllerBase
         });
     }
 
-    /// <summary>Converts care instructions to audio via YarnGPT TTS (Pidgin/Yoruba/Hausa/Igbo support).</summary>
+    /// <summary>Converts care instructions to audio via Spitch TTS (with YarnGPT fallback).</summary>
     /// <response code="200">Synthesized audio URL.</response>
     /// <response code="503">Speech synthesis is not configured or unavailable.</response>
     [HttpPost("respond")]
@@ -106,36 +112,97 @@ public class VoiceController : ControllerBase
             return BadRequest(new { error = "Text is required." });
         if (request.Text.Length > 1500)
             return BadRequest(new { error = "Text must be 1,500 characters or fewer." });
-        if (!_yarnGpt.IsConfigured)
-            return StatusCode(StatusCodes.Status503ServiceUnavailable, new { error = "Speech synthesis is not configured on this server.", code = "tts_unavailable" });
 
-        try
+        if (_spitch.IsConfigured)
         {
-            var ttsResult = await _yarnGpt.SynthesizeSpeechAsync(request.Text.Trim(), request.Voice ?? "umar", outputFormat: "mp3", targetLanguage: request.TargetLanguage, ct);
-            return Ok(new { audioUrl = ttsResult.AudioUrl, creditsCharged = ttsResult.CreditsCharged });
+            try
+            {
+                var voice = !string.IsNullOrWhiteSpace(request.Voice)
+                    ? request.Voice.Trim().ToLowerInvariant()
+                    : request.TargetLanguage?.ToLowerInvariant() switch
+                    {
+                        "yo" => "sade",
+                        "ha" => "umar",
+                        "ig" => "chiamaka",
+                        _ => "amina"
+                    };
+
+                var spitchResult = await _spitch.SynthesizeSpeechAsync(
+                    request.Text.Trim(),
+                    voice,
+                    request.TargetLanguage,
+                    speed: 1.0m,
+                    format: "mp3",
+                    ct: ct);
+
+                return Ok(new
+                {
+                    audioUrl = spitchResult.AudioUrl,
+                    provider = "spitch",
+                    voice = voice,
+                    creditsCharged = 0
+                });
+            }
+            catch (Exception ex) when (!ct.IsCancellationRequested)
+            {
+                _logger.LogWarning(ex, "Spitch TTS failed, trying YarnGPT fallback");
+            }
         }
-        catch (Exception ex) when (!ct.IsCancellationRequested)
+
+        if (_yarnGpt.IsConfigured)
         {
-            _logger.LogError(ex, "Voice response TTS failed");
-            return StatusCode(StatusCodes.Status503ServiceUnavailable, new { error = "Speech synthesis is unavailable.", code = "tts_unavailable" });
+            try
+            {
+                var ttsResult = await _yarnGpt.SynthesizeSpeechAsync(
+                    request.Text.Trim(),
+                    request.Voice ?? "umar",
+                    outputFormat: "mp3",
+                    targetLanguage: request.TargetLanguage,
+                    ct: ct);
+
+                return Ok(new
+                {
+                    audioUrl = ttsResult.AudioUrl,
+                    provider = "yarngpt",
+                    voice = request.Voice ?? "umar",
+                    creditsCharged = ttsResult.CreditsCharged
+                });
+            }
+            catch (Exception ex) when (!ct.IsCancellationRequested)
+            {
+                _logger.LogError(ex, "YarnGPT voice response TTS failed");
+            }
         }
+
+        return StatusCode(StatusCodes.Status503ServiceUnavailable, new
+        {
+            error = "Speech synthesis is unavailable or not configured on this server.",
+            code = "tts_unavailable"
+        });
     }
 
-    /// <summary>List available YarnGPT voices.</summary>
+    /// <summary>List available voices across configured speech engines.</summary>
     [HttpGet("voices")]
     public async Task<IActionResult> GetVoices(CancellationToken ct)
     {
-        if (!_yarnGpt.IsConfigured)
-            return Ok(Array.Empty<string>());
-        try
+        if (_spitch.IsConfigured)
         {
-            return Ok(await _yarnGpt.GetVoicesAsync(ct));
+            return Ok(await _spitch.GetVoicesAsync(ct));
         }
-        catch (Exception ex) when (!ct.IsCancellationRequested)
+
+        if (_yarnGpt.IsConfigured)
         {
-            _logger.LogError(ex, "Failed to fetch voices");
-            return StatusCode(StatusCodes.Status503ServiceUnavailable, new { error = "Voice service is unavailable." });
+            try
+            {
+                return Ok(await _yarnGpt.GetVoicesAsync(ct));
+            }
+            catch (Exception ex) when (!ct.IsCancellationRequested)
+            {
+                _logger.LogError(ex, "Failed to fetch voices");
+            }
         }
+
+        return Ok(Array.Empty<string>());
     }
 }
 

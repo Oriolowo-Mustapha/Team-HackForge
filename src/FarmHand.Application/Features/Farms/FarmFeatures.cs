@@ -36,8 +36,22 @@ internal static class FarmSummaries
         var animals = (await unitOfWork.LivestockAnimals.GetByFarmIdAsync(farm.Id, ct)).Count();
         var openIncidents = (await unitOfWork.Incidents.GetOpenByFarmIdAsync(farm.Id, ct)).Count();
         var pending = await unitOfWork.PoultryObservations.CountPendingAsync(farm.Id, ct);
-        return new FarmSummaryDto(farm.Id, farm.DisplayName, farm.Location, farm.CreatedAt,
-            categories.Count, animals, categories.Sum(c => c.AnimalCount), openIncidents, pending);
+        return new FarmSummaryDto(
+            farm.Id,
+            farm.DisplayName,
+            farm.Location,
+            farm.CreatedAt,
+            categories.Count,
+            animals,
+            categories.Sum(c => c.AnimalCount),
+            openIncidents,
+            pending,
+            farm.Latitude,
+            farm.Longitude,
+            farm.CityOrTown,
+            farm.State,
+            farm.Country,
+            farm.LocationSource);
     }
 }
 
@@ -62,14 +76,29 @@ public class GetFarmQueryHandler : IRequestHandler<GetFarmQuery, FarmSummaryDto>
     }
 }
 
-public record UpdateFarmCommand(Guid FarmId, string DisplayName, string Location) : IRequest<FarmSummaryDto>;
+public record UpdateFarmCommand(
+    Guid FarmId,
+    string DisplayName,
+    string Location,
+    double? Latitude = null,
+    double? Longitude = null,
+    string? CityOrTown = null,
+    string? State = null,
+    string? Country = null,
+    string? LocationSource = null) : IRequest<FarmSummaryDto>;
 
 public class UpdateFarmCommandValidator : AbstractValidator<UpdateFarmCommand>
 {
     public UpdateFarmCommandValidator()
     {
         RuleFor(x => x.DisplayName).NotEmpty().MaximumLength(200);
-        RuleFor(x => x.Location).NotEmpty().MaximumLength(200);
+        RuleFor(x => x.Location).NotEmpty().MaximumLength(300);
+        RuleFor(x => x.Latitude).InclusiveBetween(-90, 90).When(x => x.Latitude.HasValue);
+        RuleFor(x => x.Longitude).InclusiveBetween(-180, 180).When(x => x.Longitude.HasValue);
+        RuleFor(x => x.CityOrTown).MaximumLength(100);
+        RuleFor(x => x.State).MaximumLength(100);
+        RuleFor(x => x.Country).MaximumLength(100);
+        RuleFor(x => x.LocationSource).MaximumLength(50);
     }
 }
 
@@ -88,7 +117,15 @@ public class UpdateFarmCommandHandler : IRequestHandler<UpdateFarmCommand, FarmS
     {
         await _authorization.EnsureFarmAccessAsync(request.FarmId, ct);
         var farm = await _unitOfWork.Farms.GetByIdAsync(request.FarmId, ct) ?? throw PublicException.NotFound("Farm not found.");
-        farm.UpdateDetails(request.DisplayName.Trim(), request.Location.Trim());
+        farm.UpdateDetails(
+            request.DisplayName.Trim(),
+            request.Location.Trim(),
+            request.Latitude,
+            request.Longitude,
+            request.CityOrTown?.Trim(),
+            request.State?.Trim(),
+            request.Country?.Trim(),
+            request.LocationSource?.Trim());
         await _unitOfWork.SaveChangesAsync(ct);
         return await FarmSummaries.BuildAsync(farm, _unitOfWork, ct);
     }
@@ -175,7 +212,8 @@ public class GetFarmOverviewQueryHandler : IRequestHandler<GetFarmOverviewQuery,
         var (nextAction, nextKind) = ChooseNextAction(counts, open, activeRows, pending, reminders, categories.Count, incidents.Count, recentObservations.Count);
 
         return new FarmDashboardDto(
-            new FarmDto(farm.Id, farm.OwnerId, farm.DisplayName, farm.Location, farm.CreatedAt),
+            new FarmDto(farm.Id, farm.OwnerId, farm.DisplayName, farm.Location, farm.CreatedAt,
+                farm.Latitude, farm.Longitude, farm.CityOrTown, farm.State, farm.Country, farm.LocationSource),
             counts,
             open.OrderByDescending(i => i.Severity).ThenByDescending(i => i.DetectedAt).Take(5).Select(i => i.ToDto()).ToList(),
             pending,

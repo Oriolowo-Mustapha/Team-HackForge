@@ -4,24 +4,49 @@ using FarmHand.Infrastructure.Services;
 
 namespace FarmHand.Infrastructure.AI.Services;
 
-/// <summary>Voice-to-text: YarnGPT (built for Nigerian languages) first, Gemini audio understanding second.</summary>
+/// <summary>Voice-to-text: Spitch (African and English languages) first, YarnGPT second, Gemini audio understanding third.</summary>
 public class TranscriptionService : ITranscriptionService
 {
+    private readonly SpitchService _spitch;
     private readonly YarnGptService _yarnGpt;
     private readonly IGeminiAiClient _gemini;
     private readonly ILogger<TranscriptionService> _logger;
 
-    public TranscriptionService(YarnGptService yarnGpt, IGeminiAiClient gemini, ILogger<TranscriptionService> logger)
+    public TranscriptionService(
+        SpitchService spitch,
+        YarnGptService yarnGpt,
+        IGeminiAiClient gemini,
+        ILogger<TranscriptionService> logger)
     {
+        _spitch = spitch;
         _yarnGpt = yarnGpt;
         _gemini = gemini;
         _logger = logger;
     }
 
-    public bool IsConfigured => _yarnGpt.IsConfigured || _gemini.IsConfigured;
+    public bool IsConfigured => _spitch.IsConfigured || _yarnGpt.IsConfigured || _gemini.IsConfigured;
 
     public async Task<TranscriptionResult> TranscribeAsync(byte[] audio, string contentType, string fileName, string idempotencyKey, CancellationToken ct = default)
     {
+        if (_spitch.IsConfigured)
+        {
+            try
+            {
+                using var stream = new MemoryStream(audio);
+                var result = await _spitch.TranscribeAudioAsync(stream, fileName, contentType, ct: ct);
+                if (!string.IsNullOrWhiteSpace(result.Text))
+                {
+                    _logger.LogInformation("Audio successfully transcribed with Spitch (RequestId: {RequestId}, DetectedLang: {Lang})",
+                        result.RequestId, result.DetectedLanguage);
+                    return new TranscriptionResult(result.Text.Trim(), "spitch");
+                }
+            }
+            catch (Exception ex) when (!ct.IsCancellationRequested)
+            {
+                _logger.LogWarning(ex, "Spitch transcription failed, trying fallback providers");
+            }
+        }
+
         if (_yarnGpt.IsConfigured)
         {
             try
@@ -33,7 +58,7 @@ public class TranscriptionService : ITranscriptionService
             }
             catch (Exception ex) when (!ct.IsCancellationRequested)
             {
-                _logger.LogWarning(ex, "YarnGPT transcription failed");
+                _logger.LogWarning(ex, "YarnGPT transcription failed, trying Gemini fallback");
             }
         }
 
