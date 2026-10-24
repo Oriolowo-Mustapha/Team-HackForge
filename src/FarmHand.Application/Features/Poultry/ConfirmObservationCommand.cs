@@ -273,7 +273,7 @@ public class ConfirmObservationCommandHandler : IRequestHandler<ConfirmObservati
 
         var subject = await DescribeSubjectAsync(observation, ct);
         var safe = AssessmentSafety.Apply(AssessmentSafety.InputFor(observation, subject.Description),
-            new AIAssessment(existingIncident is { } linked && linked.Severity > diagnosis.Severity ? linked.Severity : diagnosis.Severity,
+            new AIAssessment(AssessmentSafety.StoredSeverity(diagnosis.Severity, diagnosis.RequiresVetConsultation, existingIncident?.Severity),
                 string.Empty, string.Empty, false, null, diagnosis.Source ?? RuleBasedAnalyzer.Source), subject.Headcount);
 
         var responseAudio = await SynthesizeVoiceReplyAsync(

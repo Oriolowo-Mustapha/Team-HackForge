@@ -88,6 +88,29 @@ public class BackendBoundaryTests
     }
 
     [DatabaseFact]
+    public async Task FarmerRaisedUrgency_PreservesCriticalEscalationOnReportReadAndConfirmRetry()
+    {
+        await using var scope = await Scope.Create();
+        var observation = scope.Observation("Routine observation without known red flags");
+        scope.Db.PoultryObservations.Add(observation);
+        await scope.Db.SaveChangesAsync();
+        var handler = scope.ConfirmHandler();
+        var result = await handler.Handle(new ConfirmObservationCommand(observation.Id, null, Severity.Critical), default);
+        Assert.Equal("Low", result.AiSeverity);
+        Assert.Equal("Critical", result.FinalSeverity);
+        scope.Db.ChangeTracker.Clear();
+        var saved = await scope.Db.PoultryObservations.SingleAsync(o => o.Id == observation.Id);
+        var detail = await new ObservationProjector(scope.Unit).DetailAsync(saved, false, default);
+        Assert.Equal(Severity.Critical, detail.Assessment!.Severity);
+        Assert.True(detail.Assessment.RequiresVetConsultation);
+        Assert.Contains("contact a veterinarian today", detail.Assessment.RecommendedAction);
+        var repeated = await handler.Handle(new ConfirmObservationCommand(observation.Id, null), default);
+        Assert.Equal("Critical", repeated.FinalSeverity);
+        Assert.True(repeated.AiRequiresVetConsultation);
+        Assert.Equal(result.AutoCreatedIncidentId, repeated.AutoCreatedIncidentId);
+    }
+
+    [DatabaseFact]
     public async Task Confirmation_FailedFinalWriteRollsBackReportAssessmentAndCaseTogether()
     {
         await using var scope = await Scope.Create();

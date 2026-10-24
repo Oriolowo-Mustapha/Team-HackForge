@@ -55,4 +55,8 @@ public static class AssessmentSafety
     /// <summary>A farmer may increase urgency, but cannot suppress the assessed safety escalation.</summary>
     public static Severity FinalSeverity(Severity assessed, Severity? requested) =>
         requested is { } value && Enum.IsDefined(value) && value > assessed ? value : assessed;
+
+    /// <summary>Preserve saved escalation flags and farmer-raised case urgency when rendering history.</summary>
+    public static Severity StoredSeverity(Severity assessed, bool requiresVet, Severity? linkedCaseSeverity = null) =>
+        FinalSeverity(FinalSeverity(assessed, requiresVet ? Severity.High : null), linkedCaseSeverity);
 }

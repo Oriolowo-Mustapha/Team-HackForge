@@ -102,12 +102,13 @@ public static class Mappers
         }
     }
 
-    public static AssessmentDto ToDto(this AIDiagnosis d, PoultryObservation observation, int? headcount = null)
+    public static AssessmentDto ToDto(this AIDiagnosis d, PoultryObservation observation, int? headcount = null, Severity? linkedCaseSeverity = null)
     {
         // Historical model prose is never rendered as current advice. Preserve the stored record
         // and derive safe display guidance without writing back to the database.
         var safe = AssessmentSafety.Apply(AssessmentSafety.InputFor(observation),
-            new AIAssessment(d.Severity, string.Empty, string.Empty, false, null, d.Source ?? "rules"), headcount);
+            new AIAssessment(AssessmentSafety.StoredSeverity(d.Severity, d.RequiresVetConsultation, linkedCaseSeverity),
+                string.Empty, string.Empty, false, null, d.Source ?? "rules"), headcount);
         return new AssessmentDto(safe.Severity, safe.DiagnosisSummary, safe.RecommendedAction,
             safe.FarmerActions ?? [], safe.RequiresVetConsultation, d.Source, IsAiSource(d.Source), d.CreatedAt);
     }

@@ -49,6 +49,9 @@ public class ObservationProjector
         var diagnosis = await _unitOfWork.AIDiagnoses.GetByObservationIdAsync(o.Id, ct);
         var incidentId = diagnosis?.IncidentId
             ?? (await _unitOfWork.Incidents.GetBySourceObservationIdsAsync([o.Id], ct)).FirstOrDefault()?.Id;
+        var linkedIncident = incidentId is { } linkedId ? await _unitOfWork.Incidents.GetByIdAsync(linkedId, ct) : null;
+        var linkedSeverity = linkedIncident is not null && linkedIncident.FarmId == o.FarmId
+            && linkedIncident.SourceObservationId == o.Id ? linkedIncident.Severity : (Severity?)null;
         var extraction = Mappers.ReadExtraction(o.ExtractionDetails);
 
         return new ObservationDetailDto(
@@ -60,7 +63,7 @@ public class ObservationProjector
             o.ConfirmationStatus, o.ExtractedByAi, Mappers.IsAiSource(o.ExtractedByAi),
             extraction.Symptoms, extraction.MissingInformation, o.InputChannels,
             o.DetectedLanguage,
-            diagnosis?.ToDto(o, category?.AnimalCount > 0 ? category.AnimalCount : null), incidentId, reused);
+            diagnosis?.ToDto(o, category?.AnimalCount > 0 ? category.AnimalCount : null, linkedSeverity), incidentId, reused);
     }
 }
 
