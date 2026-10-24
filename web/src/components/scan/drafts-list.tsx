@@ -5,31 +5,39 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { deleteDraft, listDrafts, type ReportDraft } from "@/lib/drafts";
 import { formatRelative } from "@/lib/format";
+import { useSession } from "@/lib/hooks/use-session";
 import { Button } from "@/components/ui/button";
-import { EmptyState } from "@/components/ui/states";
+import { EmptyState, ErrorState, InlineError } from "@/components/ui/states";
 import { formatDuration } from "./voice-recorder";
 
 /** Reports saved on this device that haven't been sent yet. */
 export function DraftsList({ farmId }: { farmId: string }) {
+  const { user } = useSession();
+  const ownerUserId = user?.userId ?? "";
   const [drafts, setDrafts] = useState<ReportDraft[] | null>(null);
+  const [error, setError] = useState<unknown>(null);
 
   useEffect(() => {
-    listDrafts()
-      .then((all) => setDrafts(all.filter((d) => d.farmId === farmId)))
-      .catch(() => setDrafts([]));
-  }, [farmId]);
+    let cancelled = false;
+    listDrafts(ownerUserId)
+      .then((all) => { if (!cancelled) setDrafts(all.filter((d) => d.farmId === farmId)); })
+      .catch(() => { if (!cancelled) setError(new Error("Drafts could not be read from this device. Allow browser storage, then reopen this list.")); });
+    return () => { cancelled = true; };
+  }, [farmId, ownerUserId]);
 
-  if (drafts === null) return null;
-  if (drafts.length === 0)
+  const visibleDrafts = drafts?.filter((draft) => draft.ownerUserId === ownerUserId && draft.farmId === farmId);
+  if (error && visibleDrafts === undefined) return <ErrorState error={error} />;
+  if (visibleDrafts === undefined) return <p role="status" className="text-sm text-muted">Loading drafts…</p>;
+  if (visibleDrafts.length === 0)
     return (
       <EmptyState icon={<CloudOff />} title="No unsent reports">
-        If you lose signal while sending a report, it&apos;s kept here until you&apos;re back online.
+        Successfully saved drafts appear here so you can send them when you&apos;re back online.
       </EmptyState>
     );
 
   return (
-    <ul className="space-y-2.5">
-      {drafts.map((d) => (
+    <><InlineError error={error} /><ul className="space-y-2.5">
+      {visibleDrafts.map((d) => (
         <li key={d.id} className="rounded-[24px] bg-paper p-4 ring-1 ring-line/60">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
@@ -58,8 +66,13 @@ export function DraftsList({ farmId }: { farmId: string }) {
               aria-label="Delete draft"
               icon={<Trash2 className="size-4" />}
               onClick={async () => {
-                await deleteDraft(d.id);
-                setDrafts((list) => list?.filter((x) => x.id !== d.id) ?? []);
+                try {
+                  await deleteDraft(d.id);
+                  setDrafts((list) => list?.filter((x) => x.id !== d.id) ?? []);
+                  setError(null);
+                } catch {
+                  setError(new Error("This draft could not be deleted. Please try again."));
+                }
               }}
             >
               Delete
@@ -67,6 +80,6 @@ export function DraftsList({ farmId }: { farmId: string }) {
           </div>
         </li>
       ))}
-    </ul>
+    </ul></>
   );
 }

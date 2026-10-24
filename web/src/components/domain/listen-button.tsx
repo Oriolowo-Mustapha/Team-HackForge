@@ -5,6 +5,7 @@ import { Volume2, VolumeX, Loader2 } from "lucide-react";
 import { useMutation } from "@tanstack/react-query";
 import { voiceApi } from "@/lib/api/endpoints";
 import { cn } from "@/lib/cn";
+import { toast } from "sonner";
 
 type ListenState = "idle" | "loading" | "playing";
 
@@ -74,7 +75,10 @@ export function ListenButton({
   const speak = useMutation({
     mutationFn: () => voiceApi.speak(text!.slice(0, 1500), { voice, targetLanguage }),
     onSuccess: (data) => playUrl(data.audioUrl),
-    onError: () => setState("idle"),
+    onError: () => {
+      setState("idle");
+      toast.error("Audio is unavailable right now. Your report text is still available to read.");
+    },
   });
 
   // Auto-play a ready-made response (the farmer just confirmed by clicking, so playback is allowed).

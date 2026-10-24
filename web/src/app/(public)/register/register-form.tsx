@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 import { ApiError } from "@/lib/api/client";
 import { sessionApi } from "@/lib/api/endpoints";
-import { qk } from "@/lib/queries";
+import { clearLocalData } from "@/lib/drafts";
 import { PASSWORD_HINT, passwordProblem } from "@/components/auth/auth-frame";
 import { Button } from "@/components/ui/button";
 import { Field, Input, PasswordInput } from "@/components/ui/field";
@@ -37,6 +37,7 @@ export function RegisterForm() {
 
   async function submit(event: FormEvent) {
     event.preventDefault();
+    if (pending) return;
     const found = validate();
     setErrors(found);
     if (Object.keys(found).length) return;
@@ -49,7 +50,9 @@ export function RegisterForm() {
         password: form.password,
         phoneNumber: form.phone.trim() || undefined,
       });
-      await client.resetQueries({ queryKey: qk.session });
+      await client.cancelQueries();
+      client.clear();
+      await clearLocalData();
       router.replace("/setup");
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) setErrors({ email: "An account with this email already exists. Try signing in." });

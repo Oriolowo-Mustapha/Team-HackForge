@@ -3,6 +3,7 @@ import {
   expect,
   type APIRequestContext,
   type PlaywrightWorkerArgs,
+  type Page,
 } from "@playwright/test";
 
 const baseURL = process.env.E2E_BASE_URL ?? "http://127.0.0.1:3000";
@@ -238,7 +239,6 @@ test("permissions, CSRF, and complete clinical/payment lifecycle", async ({
       {
         incidentId,
         requestType: 0,
-        farmerCost: 1500,
         vetPartnerId: null,
         description: "Please review the flock",
         preferredVisitDate: null,
@@ -246,6 +246,7 @@ test("permissions, CSRF, and complete clinical/payment lifecycle", async ({
     );
     const requestId = created.id;
     const open = await json(vet, `VetCoordination/vet-requests/${requestId}`);
+    expect(open.farmerCost).toBe(20_000);
     expect(open.farmer).toBeNull();
     const claims = await Promise.all([
       vet.post(`/api/bff/VetCoordination/vet-requests/${requestId}/respond`, {
@@ -272,7 +273,8 @@ test("permissions, CSRF, and complete clinical/payment lifecycle", async ({
       farmer,
       `payments/quote?vetRequestId=${requestId}`,
     );
-    expect(quote.total).toBe(1575);
+    expect(quote.vetFee).toBe(20_000);
+    expect(quote.total).toBe(21_000);
     expect(quote.mode).toBe("Simulated");
     const key = crypto.randomUUID();
     expect(
@@ -285,13 +287,13 @@ test("permissions, CSRF, and complete clinical/payment lifecycle", async ({
     const payment = await json(
       farmer,
       "payments/initiate",
-      { vetRequestId: requestId, amount: 1500, currency: "NGN" },
+      { vetRequestId: requestId, amount: 20_000, currency: "NGN" },
       { "idempotency-key": key },
     );
     const repeated = await json(
       farmer,
       "payments/initiate",
-      { vetRequestId: requestId, amount: 1500, currency: "NGN" },
+      { vetRequestId: requestId, amount: 20_000, currency: "NGN" },
       { "idempotency-key": key },
     );
     expect(repeated.transactionReference).toBe(payment.transactionReference);
@@ -309,7 +311,7 @@ test("permissions, CSRF, and complete clinical/payment lifecycle", async ({
       .getByRole("button", { name: "Confirm simulated payment", exact: true })
       .click();
     await expect(
-      checkout.getByText("Completed", { exact: true }),
+      checkout.getByText("Payment complete", { exact: true }),
     ).toBeVisible();
     const verified = await json(farmer, "payments/verify", {
       transactionReference: payment.transactionReference,
@@ -473,5 +475,260 @@ test("GPS locations accept zero coordinates and survive a farm-name edit", async
     expect(saved.latitude).toBe(0);
     expect(saved.longitude).toBe(0);
     expect(saved.locationSource).toBe("device_gps");
+  } finally { await context.close(); await farmer.dispose(); }
+});
+
+async function storedDrafts(page: Page) {
+  return page.evaluate(async () => {
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open("farmhand");
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    try {
+      const rows = await new Promise<Array<{ id: string; farmId: string; text: string; createdAt: number; idempotencyKey: string }>>((resolve, reject) => {
+        const request = db.transaction("report-drafts").objectStore("report-drafts").getAll();
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      return rows.map(({ id, farmId, text, createdAt, idempotencyKey }) => ({ id, farmId, text, createdAt, idempotencyKey }));
+    } finally { db.close(); }
+  });
+}
+
+test("farmer and vet finish the clinical workflow through the interface", async ({ playwright, browser }) => {
+  test.setTimeout(120_000);
+  const farmer = await loginApi(playwright, "farmer@farmhand.ai");
+  const vet = await loginApi(playwright, "vet@farmhand.ai");
+  const farmerContext = await browser.newContext({ baseURL, storageState: await farmer.storageState() });
+  const vetContext = await browser.newContext({ baseURL, storageState: await vet.storageState() });
+  try {
+    const session = await (await farmer.get("/api/session")).json();
+    const vetSession = await (await vet.get("/api/session")).json();
+    const farmId = session.user.farms[0].id;
+    const groups = await json(farmer, `livestock/categories/details?farmId=${farmId}`);
+    const group = groups[0];
+    const page = await farmerContext.newPage();
+    await page.goto(`/scan?group=${group.id}`);
+    await page.getByRole("tab", { name: "Text", exact: true }).click();
+    await page.getByLabel("Describe what you see", { exact: true }).fill("Several birds are weak and eating less since yesterday.");
+    await page.getByRole("button", { name: "Flock numbers today", exact: false }).click();
+    await page.getByLabel("Deaths", { exact: true }).fill("3");
+    await page.getByLabel("Feed", { exact: true }).fill("reduced to one bag");
+    await page.getByLabel("Water", { exact: true }).fill("half the usual amount");
+    await page.getByLabel("Eggs collected", { exact: true }).fill("12");
+    const submission = page.waitForResponse((response) => response.url().endsWith("/api/bff/observations") && response.request().method() === "POST");
+    await page.getByRole("button", { name: "Analyse report", exact: true }).click();
+    const submitted = await (await submission).json();
+    await expect(page).toHaveURL(new RegExp(`/reports/${submitted.id}`));
+    await expect(page.getByLabel("Deaths", { exact: true })).toHaveValue("3");
+    await expect(page.getByLabel("Feed", { exact: true })).toHaveValue("reduced to one bag");
+    await expect(page.getByLabel("Water", { exact: true })).toHaveValue("half the usual amount");
+    await expect(page.getByLabel("Eggs", { exact: true })).toHaveValue("12");
+    await expect(page.getByText("Original report text", { exact: true })).toBeVisible();
+
+    // Exercise the actual Listen control without calling a paid provider.
+    await page.route("**/api/bff/voice/respond", (route) => route.fulfill({ status: 503, json: { title: "Speech service unavailable" } }));
+    const speech = page.waitForRequest((request) => request.url().endsWith("/api/bff/voice/respond"));
+    await page.getByRole("button", { name: "Listen", exact: true }).click();
+    await speech;
+    await expect(page.getByText("Audio is unavailable right now. Your report text is still available to read.", { exact: true })).toBeVisible();
+    await page.unroute("**/api/bff/voice/respond");
+
+    await page.getByRole("button", { name: "Confirm report", exact: true }).click();
+    await expect(page.getByText("Report confirmed", { exact: true })).toBeVisible();
+    await expect(page.getByText(/This is a triage suggestion, not a diagnosis/)).toBeVisible();
+    await page.getByRole("link", { name: "Ask a vet", exact: true }).click();
+    await expect(page).toHaveURL(/\/cases\/[^?]+\?request=1$/);
+    const incidentId = new URL(page.url()).pathname.split("/").at(-1)!;
+    const requestDialog = page.getByRole("dialog", { name: "Ask a vet", exact: true });
+    await requestDialog.getByRole("radio", { name: "Remote review", exact: true }).click();
+    await requestDialog.getByLabel("Vet", { exact: true }).selectOption(vetSession.user.vetProfile.id);
+    await expect(requestDialog.getByText(/Fixed consultation fee/)).toContainText("21,000");
+    const requestCreated = page.waitForResponse((response) => response.url().includes("/vet-request") && response.request().method() === "POST");
+    await requestDialog.getByRole("button", { name: "Send request", exact: true }).click();
+    const request = await (await requestCreated).json();
+    await expect(requestDialog).toBeHidden();
+
+    const doctor = await vetContext.newPage();
+    await doctor.goto(`/vet/requests/${request.id}`);
+    await doctor.getByRole("button", { name: "Accept request", exact: true }).click();
+    await doctor.getByRole("dialog").getByRole("button", { name: "Confirm", exact: true }).click();
+    await expect(doctor.getByRole("button", { name: "Write treatment plan", exact: true })).toBeVisible();
+    await page.reload();
+    await page.getByRole("link", { name: /Review and pay/ }).click();
+    await expect(page.getByText("Simulated payment", { exact: true })).toBeVisible();
+    const verificationResponse = page.waitForResponse((response) => response.url().endsWith("/api/bff/payments/verify") && response.request().method() === "POST");
+    await page.getByRole("button", { name: "Confirm simulated payment", exact: true }).click();
+    const verifiedPayment = await (await verificationResponse).json();
+    await expect(page.getByText("Payment complete", { exact: true })).toBeVisible();
+    await page.goto(`/payment/callback?tx_ref=${encodeURIComponent(verifiedPayment.payment.transactionReference)}`);
+    await expect(page.getByText("Payment confirmed", { exact: true })).toBeVisible();
+
+    await doctor.reload();
+    await doctor.getByRole("button", { name: "Write treatment plan", exact: true }).click();
+    const plan = `UI follow-up ${Date.now()}: isolate affected birds, provide clean water and arrange an examination.`;
+    const planDialog = doctor.getByRole("dialog", { name: "Treatment plan", exact: true });
+    await planDialog.getByLabel("Instructions", { exact: true }).fill(plan);
+    await planDialog.getByLabel("Step 1", { exact: true }).fill("Review water intake tomorrow");
+    await planDialog.getByRole("button", { name: "Share plan", exact: true }).click();
+    await expect(planDialog).toBeHidden();
+    await doctor.getByLabel("Consultation notes or reason", { exact: true }).fill("Remote review completed; follow the plan and contact me if signs worsen.");
+    await doctor.getByRole("button", { name: "Complete consultation", exact: true }).click();
+    await doctor.getByRole("dialog").getByRole("button", { name: "Confirm", exact: true }).click();
+    await expect(doctor.getByRole("dialog")).toBeHidden();
+
+    await page.goto(`/cases/${incidentId}`);
+    await expect(page.getByRole("main")).toContainText(plan);
+    await page.getByRole("radio", { name: "Improving", exact: true }).click();
+    await page.getByLabel("Follow-up notes", { exact: true }).fill("Water intake is improving after the veterinary review.");
+    await page.getByRole("button", { name: "Save follow-up", exact: true }).click();
+    await expect(page.getByText("Follow-up recorded", { exact: true })).toBeVisible();
+    await page.reload();
+    await expect(page.getByRole("main")).toContainText(plan);
+    await expect(page.getByRole("main")).toContainText("Water intake is improving after the veterinary review.");
+    await expect(page.getByRole("heading", { name: "Timeline", exact: true })).toBeVisible();
+  } finally {
+    await farmerContext.close(); await vetContext.close(); await farmer.dispose(); await vet.dispose();
+  }
+});
+
+test("offline drafts return to their original farm and explicit zero survives analysis", async ({ playwright, browser }) => {
+  const farmer = await loginApi(playwright, "farmer@farmhand.ai");
+  const context = await browser.newContext({ baseURL, storageState: await farmer.storageState() });
+  try {
+    const session = await (await farmer.get("/api/session")).json();
+    const farmId = session.user.farms[0].id;
+    const groups = await json(farmer, `livestock/categories/details?farmId=${farmId}`);
+    const otherFarm = await json(farmer, "farms", { displayName: `Draft switch ${Date.now()}`, location: "Local test" });
+    const page = await context.newPage();
+    const note = `Draft recovery ${Date.now()}: three birds died yesterday; no deaths today.`;
+    await page.goto(`/scan?group=${groups[0].id}`);
+    await page.getByRole("tab", { name: "Photo", exact: true }).focus();
+    await page.keyboard.press("End");
+    await expect(page.getByRole("tab", { name: "Text", exact: true })).toBeFocused();
+    await expect(page.getByRole("tab", { name: "Text", exact: true })).toHaveAttribute("aria-selected", "true");
+    await page.getByLabel("Describe what you see", { exact: true }).fill(note);
+    await page.getByRole("button", { name: "Flock numbers today", exact: false }).click();
+    await page.getByLabel("Deaths", { exact: true }).fill("0");
+    await context.setOffline(true);
+    await page.getByRole("button", { name: "Save for later", exact: true }).click();
+    await expect(page.getByText("Saved on this device", { exact: true })).toBeVisible();
+    const draft = (await storedDrafts(page)).find((item) => item.text === note)!;
+    expect(draft.farmId).toBe(farmId);
+    await context.setOffline(false);
+    await page.evaluate((id) => localStorage.setItem("fh:active-farm", id), otherFarm.id);
+    await page.goto(`/scan?draft=${draft.id}`);
+    await expect(page.getByLabel("Describe what you see", { exact: true })).toHaveValue(note);
+    await expect.poll(() => page.evaluate(() => localStorage.getItem("fh:active-farm"))).toBe(farmId);
+    const restored = (await storedDrafts(page)).find((item) => item.id === draft.id)!;
+    expect(restored.createdAt).toBe(draft.createdAt);
+    expect(restored.idempotencyKey).toBe(draft.idempotencyKey);
+    const revisedNote = `${note} No new signs observed.`;
+    await page.getByLabel("Describe what you see", { exact: true }).fill(revisedNote);
+    await page.clock.setFixedTime(new Date(Date.now() + 61_000));
+    const sessionRefetched = page.waitForResponse((item) => item.url().endsWith("/api/session"));
+    await page.evaluate(() => window.dispatchEvent(new Event("visibilitychange")));
+    await sessionRefetched;
+    await expect(page.getByLabel("Describe what you see", { exact: true })).toHaveValue(revisedNote);
+    const response = page.waitForResponse((item) => item.url().endsWith("/api/bff/observations") && item.request().method() === "POST");
+    await page.getByRole("button", { name: "Analyse report", exact: true }).click();
+    const report = await (await response).json();
+    expect(report.farmId).toBe(farmId);
+    expect(report.mortalityCount).toBe(0);
+    await page.reload();
+    await expect(page.getByLabel("Deaths", { exact: true })).toHaveValue("0");
+    const repeated = await farmer.post("/api/bff/observations", { multipart: { farmId, livestockCategoryId: groups[0].id, text: revisedNote, mortalityCount: "0", idempotencyKey: draft.idempotencyKey } });
+    expect(repeated.ok(), await repeated.text()).toBe(true);
+    expect((await repeated.json()).id).toBe(report.id);
+  } finally { await context.setOffline(false); await context.close(); await farmer.dispose(); }
+});
+
+test("blocked device storage is visible and closing preserves the unsaved form", async ({ playwright, browser }) => {
+  const farmer = await loginApi(playwright, "farmer@farmhand.ai");
+  const context = await browser.newContext({ baseURL, storageState: await farmer.storageState() });
+  try {
+    await context.addInitScript(() => Object.defineProperty(indexedDB, "open", { value: () => { throw new DOMException("Storage blocked", "SecurityError"); } }));
+    const session = await (await farmer.get("/api/session")).json();
+    const groups = await json(farmer, `livestock/categories/details?farmId=${session.user.farms[0].id}`);
+    const page = await context.newPage();
+    await page.goto(`/scan?group=${groups[0].id}`);
+    await page.getByRole("tab", { name: "Text", exact: true }).click();
+    await page.getByLabel("Describe what you see", { exact: true }).fill("Keep this unsaved note visible.");
+    await expect(page.getByRole("alert")).toContainText("This device could not save your draft");
+    await page.getByRole("button", { name: "Close", exact: true }).click();
+    await expect(page).toHaveURL(/\/scan\?/);
+    await expect(page.getByLabel("Describe what you see", { exact: true })).toHaveValue("Keep this unsaved note visible.");
+    await context.setOffline(true);
+    await page.getByRole("button", { name: "Save for later", exact: true }).click();
+    await expect(page.getByRole("alert")).toContainText("This device could not save your draft");
+    await expect(page.getByText("Saved on this device", { exact: true })).toHaveCount(0);
+  } finally { await context.setOffline(false); await context.close(); await farmer.dispose(); }
+});
+
+test("session-probe expiry clears private drafts before another account signs in", async ({ playwright, browser }) => {
+  const farmer = await loginApi(playwright, "farmer@farmhand.ai");
+  const context = await browser.newContext({ baseURL, storageState: await farmer.storageState() });
+  try {
+    const session = await (await farmer.get("/api/session")).json();
+    const groups = await json(farmer, `livestock/categories/details?farmId=${session.user.farms[0].id}`);
+    const page = await context.newPage();
+    const privateNote = `Private draft ${Date.now()}`;
+    await page.goto(`/scan?group=${groups[0].id}`);
+    await page.getByRole("tab", { name: "Text", exact: true }).click();
+    await page.getByLabel("Describe what you see", { exact: true }).fill(privateNote);
+    await expect.poll(async () => (await storedDrafts(page)).some((draft) => draft.text === privateNote)).toBe(true);
+    // Keep the routing cookie present but invalidate both credentials, exercising /api/session's 200/expired response.
+    await context.addCookies([
+      { name: "fh_access", value: "expired-test-token", url: baseURL, httpOnly: true, sameSite: "Lax" },
+      { name: "fh_refresh", value: "expired-test-refresh", url: baseURL, httpOnly: true, sameSite: "Lax" },
+    ]);
+    await page.goto("/profile");
+    await expect(page).toHaveURL(/\/login\?expired=1/);
+    await expect(page.getByText(/Saved drafts are private to the account that created them/)).toBeVisible();
+    await expect.poll(async () => (await storedDrafts(page)).length).toBe(0);
+    await page.getByLabel("Email", { exact: true }).fill("farmer2@farmhand.ai");
+    await page.getByLabel("Password", { exact: true }).fill(password!);
+    await page.getByRole("button", { name: "Sign in", exact: true }).click();
+    await expect(page).toHaveURL(/\/(profile|home)$/);
+    await expect(page.getByRole("main")).not.toContainText(privateNote);
+    expect(await storedDrafts(page)).toHaveLength(0);
+  } finally { await context.close(); await farmer.dispose(); }
+});
+
+test("another account cannot read drafts when device cleanup fails transiently", async ({ playwright, browser }) => {
+  const farmer = await loginApi(playwright, "farmer@farmhand.ai");
+  const context = await browser.newContext({ baseURL, storageState: await farmer.storageState() });
+  try {
+    const session = await (await farmer.get("/api/session")).json();
+    const groups = await json(farmer, `livestock/categories/details?farmId=${session.user.farms[0].id}`);
+    const page = await context.newPage();
+    const privateNote = `Private retained draft ${Date.now()}`;
+    await page.goto(`/scan?group=${groups[0].id}`);
+    await page.getByRole("tab", { name: "Text", exact: true }).click();
+    await page.getByLabel("Describe what you see", { exact: true }).fill(privateNote);
+    await expect.poll(async () => (await storedDrafts(page)).some((draft) => draft.text === privateNote)).toBe(true);
+    const draft = (await storedDrafts(page)).find((item) => item.text === privateNote)!;
+    await context.clearCookies();
+    await page.goto("/login");
+    await page.evaluate(() => {
+      const original = IDBObjectStore.prototype.clear;
+      IDBObjectStore.prototype.clear = function () {
+        IDBObjectStore.prototype.clear = original;
+        throw new DOMException("Transient cleanup block", "SecurityError");
+      };
+    });
+    await page.getByLabel("Email", { exact: true }).fill("farmer2@farmhand.ai");
+    await page.getByLabel("Password", { exact: true }).fill(password!);
+    await page.getByRole("button", { name: "Sign in", exact: true }).click();
+    await expect(page).toHaveURL(/\/home$/);
+    // Storage is readable again, and the old row remains: privacy must come from ownership checks.
+    expect((await storedDrafts(page)).some((row) => row.id === draft.id)).toBe(true);
+    await page.goto(`/scan?draft=${draft.id}`);
+    await expect(page.getByRole("alert")).toContainText("This draft is no longer on this device");
+    await expect(page.locator("body")).not.toContainText(privateNote);
+    await page.goto("/scan?drafts=1");
+    await expect(page.getByRole("dialog", { name: "Unsent reports", exact: true })).toContainText("No unsent reports");
+    await expect(page.locator("body")).not.toContainText(privateNote);
   } finally { await context.close(); await farmer.dispose(); }
 });

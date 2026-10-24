@@ -131,7 +131,7 @@ function FarmForm({ farm }: { farm: FarmSummary }) {
   );
 }
 
-export function ProfileScreen() {
+export function CurrentFarmSettings() {
   const { user } = useSession();
   const { farm } = useActiveFarm();
   const farmDetails = useQuery({
@@ -139,6 +139,19 @@ export function ProfileScreen() {
     queryFn: () => farmsApi.get(farm!.id),
     enabled: user?.role === "Farmer" && Boolean(farm),
   });
+  if (user?.role !== "Farmer" || !farm) return null;
+  return (
+    <Panel title="Current farm">
+      <ResourcePanel query={farmDetails}>
+        {(details) => <FarmForm key={details.id} farm={details} />}
+      </ResourcePanel>
+      <ButtonLink href="/setup?another=1" variant="ghost" className="mt-3">Add another farm</ButtonLink>
+    </Panel>
+  );
+}
+
+export function ProfileScreen() {
+  const { user } = useSession();
   const { signOut, pending } = useSignOut();
   if (!user) return null;
   return (
@@ -150,16 +163,7 @@ export function ProfileScreen() {
       <Panel title="Your account">
         <ProfileForm key={user.userId} user={user} />
       </Panel>
-      {user.role === "Farmer" && farm && (
-        <Panel title="Current farm">
-          <ResourcePanel query={farmDetails}>
-            {(details) => <FarmForm key={details.id} farm={details} />}
-          </ResourcePanel>
-          <ButtonLink href="/setup?another=1" variant="ghost" className="mt-3">
-            Add another farm
-          </ButtonLink>
-        </Panel>
-      )}
+      <CurrentFarmSettings />
       <Panel title="Account security">
         <div className="flex flex-wrap gap-3">
           <ButtonLink href="/change-password" variant="secondary">

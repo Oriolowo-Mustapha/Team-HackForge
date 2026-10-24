@@ -5,6 +5,7 @@ import { BadgeCheck, FileWarning, Lock, ShieldCheck } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { paymentsApi } from "@/lib/api/endpoints";
+import { newIdempotencyKey } from "@/lib/api/client";
 import { qk } from "@/lib/queries";
 import { formatMoney } from "@/lib/format";
 import { PaymentStatusBadge } from "@/components/domain/badges";
@@ -15,31 +16,47 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState, InlineError, Notice } from "@/components/ui/states";
 import type { Payment } from "@/lib/api/schemas";
 
-function idempotencyKey(): string {
-  return typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
-}
-
 export function PayScreen({ vetRequestId }: { vetRequestId: string }) {
   const client = useQueryClient();
   const [paid, setPaid] = useState<Payment | null>(null);
+  const [idempotencyKey] = useState(() => newIdempotencyKey("payment"));
   const quote = useQuery({ queryKey: qk.paymentQuote(vetRequestId), queryFn: () => paymentsApi.quote(vetRequestId) });
 
-  // Open a checkout (live) or finish immediately (simulated mode has no hosted checkout page).
+  const refreshPayments = () => Promise.all([
+    client.invalidateQueries({ queryKey: ["payment-quote"] }),
+    client.invalidateQueries({ queryKey: ["payments"] }),
+    client.invalidateQueries({ queryKey: ["incident-case"] }),
+    client.invalidateQueries({ queryKey: ["vet-request"] }),
+  ]);
+
+  // Resume an existing reference; a retry keeps the same key if initiation was interrupted.
   const initiate = useMutation({
-    mutationFn: () => paymentsApi.initiate(vetRequestId, quote.data!.vetFee, quote.data!.currency, idempotencyKey()),
-    onSuccess: async (created) => {
-      if (created.checkoutUrl) {
+    mutationFn: async () => {
+      if (!quote.data) throw new Error("Load the consultation fee first.");
+      const created = quote.data.pendingPayment ?? await paymentsApi.initiate(vetRequestId, quote.data.vetFee, quote.data.currency, idempotencyKey);
+      if (created.mode === "Live") {
+        if (!created.checkoutUrl || new URL(created.checkoutUrl).protocol !== "https:") throw new Error("A secure checkout link is not available. Verify the existing payment or try again.");
         window.location.assign(created.checkoutUrl);
-        return;
+        return null;
       }
-      // Simulated mode: there is no hosted checkout, so verify the signed reference straight away.
-      const verification = await paymentsApi.verify(created.transactionReference);
+      return paymentsApi.verify(created.transactionReference);
+    },
+    onSuccess: async (verification) => {
+      if (!verification) return;
       toast.success(verification.message || "Payment confirmed.");
-      await Promise.all([
-        client.invalidateQueries({ queryKey: qk.paymentQuote(vetRequestId) }),
-        client.invalidateQueries({ queryKey: qk.payments({}) }),
-      ]);
       setPaid(verification.payment);
+      await refreshPayments();
+    },
+    onError: () => { void quote.refetch(); },
+  });
+  const verify = useMutation({
+    mutationFn: () => {
+      if (!quote.data?.pendingPayment) throw new Error("No pending payment to verify.");
+      return paymentsApi.verify(quote.data.pendingPayment.transactionReference);
+    },
+    onSuccess: async (verification) => {
+      setPaid(verification.payment);
+      await refreshPayments();
     },
   });
 
@@ -85,8 +102,10 @@ export function PayScreen({ vetRequestId }: { vetRequestId: string }) {
       <PageHeader
         back="/home"
         title="Review and pay"
-        subtitle={q.vetName ? `${q.vetName} is paid once checkout completes.` : "Your vet is paid once checkout completes."}
+        subtitle="The server verifies the total and payment status before the consultation is marked paid."
       />
+
+      {q.mode === "Simulated" && <Notice tone="demo" title="Simulated payment">This is a demonstration. No money will be charged or transferred.</Notice>}
 
       {q.pendingPayment && (
         <Notice tone="info" icon={<BadgeCheck />} title="A checkout is already open">
@@ -108,11 +127,12 @@ export function PayScreen({ vetRequestId }: { vetRequestId: string }) {
           <Lock className="size-3.5" aria-hidden /> Paid through Flutterwave&apos;s secure checkout.
           {q.mode === "Simulated" && " Simulation mode: no real money moves."}
         </p>
-        <InlineError error={initiate.error} className="mt-3" />
+        <InlineError error={initiate.error ?? verify.error} className="mt-3" />
         <div className="mt-4">
-          <Button variant="accent" block size="lg" loading={initiate.isPending} onClick={() => initiate.mutate()}>
-            Pay {formatMoney(q.total, q.currency)}
+          <Button variant="accent" block size="lg" loading={initiate.isPending} disabled={verify.isPending} onClick={() => initiate.mutate()}>
+            {q.mode === "Simulated" ? "Confirm simulated payment" : q.pendingPayment ? "Resume secure checkout" : `Pay ${formatMoney(q.total, q.currency)}`}
           </Button>
+          {q.pendingPayment && q.mode === "Live" && <Button variant="secondary" block className="mt-2" loading={verify.isPending} disabled={initiate.isPending} onClick={() => verify.mutate()}>Verify existing payment</Button>}
         </div>
       </Card>
 
@@ -142,7 +162,7 @@ function PaidView({ payment }: { payment: Payment }) {
   const caseHref = payment.incidentId ? `/cases/${payment.incidentId}` : "/payments";
   return (
     <div className="mx-auto max-w-xl space-y-5">
-      <Notice tone="success" icon={<BadgeCheck />} title="Payment complete">
+      <Notice tone={payment.status === "Completed" ? "success" : "info"} icon={<BadgeCheck />} title={payment.status === "Completed" ? "Payment complete" : "Payment status"}>
         {payment.status === "Completed"
           ? "The vet has been notified and can start on your case."
           : `${payment.status} — ${payment.failureReason ?? "check the payment history for details."}`}

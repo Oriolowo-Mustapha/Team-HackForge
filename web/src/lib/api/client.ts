@@ -79,6 +79,10 @@ export function onSessionExpired(listener: ExpiredListener) {
   };
 }
 
+export function notifySessionExpired() {
+  expiredListeners.forEach((listener) => listener());
+}
+
 async function parseError(response: Response): Promise<ApiError> {
   let body: Record<string, unknown> = {};
   try {
@@ -142,7 +146,7 @@ export async function api<T = unknown>(path: string, options: RequestOptions<T> 
 
   if (!response.ok) {
     const error = await parseError(response);
-    if (response.status === 401 && !options.quiet401) expiredListeners.forEach((listener) => listener());
+    if (response.status === 401 && !options.quiet401) notifySessionExpired();
     throw error;
   }
 

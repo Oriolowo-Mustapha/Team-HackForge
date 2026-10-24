@@ -13,6 +13,7 @@ import { ListSkeleton } from "@/components/ui/skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/states";
 import type { Payment } from "@/lib/api/schemas";
 import { cn } from "@/lib/cn";
+import { PaymentCard } from "@/components/payments/payment-screens";
 
 export function PaymentsScreen() {
   const list = useInfiniteQuery({
@@ -62,6 +63,7 @@ export function PaymentsScreen() {
 }
 
 function PaymentRow({ payment }: { payment: Payment }) {
+  if (payment.status === "Pending") return <PaymentCard payment={payment} />;
   const paid = payment.status === "Completed";
   const inner = (
     <>

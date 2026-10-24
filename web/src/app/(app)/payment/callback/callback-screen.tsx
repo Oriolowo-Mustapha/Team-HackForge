@@ -51,7 +51,7 @@ export function CallbackScreen() {
     );
   }
 
-  if (verify.isPending) {
+  if (verify.isIdle || verify.isPending) {
     return (
       <div className="mx-auto max-w-xl">
         <Card>
@@ -65,7 +65,7 @@ export function CallbackScreen() {
   if (verify.isError) {
     return (
       <div className="mx-auto max-w-xl">
-        <ErrorState error={verify.error} onRetry={() => verify.reset()} className="mt-4" />
+        <ErrorState error={verify.error} onRetry={() => verify.mutate()} className="mt-4" />
         <div className="mt-4 flex justify-center">
           <Button variant="secondary" icon={<RotateCcw className="size-4" />} onClick={() => verify.mutate()}>
             Check again
