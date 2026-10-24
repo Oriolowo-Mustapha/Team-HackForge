@@ -25,6 +25,22 @@ public class ConfigurationTests
         ConfigurationValidator.Validate(new ConfigurationBuilder().AddInMemoryCollection(Production()).Build(), true);
 
     [Theory]
+    [InlineData("Cloudinary")]
+    [InlineData("Auto")]
+    public void PublicCloudinaryDelivery_IsRejectedInProductionEvenWithCredentials(string provider)
+    {
+        var values = Production();
+        values["Storage:Provider"] = provider;
+        values["Cloudinary:CloudName"] = "test-cloud";
+        values["Cloudinary:ApiKey"] = "test-key";
+        values["Cloudinary:ApiSecret"] = "test-secret";
+        var error = Assert.Throws<InvalidOperationException>(() => ConfigurationValidator.Validate(
+            new ConfigurationBuilder().AddInMemoryCollection(values).Build(), true));
+        Assert.Contains("Public Cloudinary delivery is disabled", error.Message);
+        ConfigurationValidator.Validate(new ConfigurationBuilder().AddInMemoryCollection(values).Build(), false);
+    }
+
+    [Theory]
     [InlineData("Demo:Enabled", "true")]
     [InlineData("Ai:DemoFallback", "true")]
     [InlineData("Flutterwave:Mode", "Simulated")]

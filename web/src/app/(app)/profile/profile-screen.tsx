@@ -15,6 +15,7 @@ import { Button, ButtonLink } from "@/components/ui/button";
 import { Card, CardTitle } from "@/components/ui/card";
 import { Field, Input } from "@/components/ui/field";
 import { ErrorState, InlineError } from "@/components/ui/states";
+import { CurrentFarmSettings } from "@/components/account/profile-screen";
 
 /** Account details, quick settings and sign out. Open to every role; the shell gates access. */
 export function ProfileScreen() {
@@ -39,6 +40,7 @@ export function ProfileScreen() {
       </header>
 
       <ProfileForm fullName={user.fullName ?? ""} phoneNumber={user.phoneNumber ?? ""} />
+      <CurrentFarmSettings />
 
       {user.role === "Farmer" && user.farms.length > 0 && (
         <Card>

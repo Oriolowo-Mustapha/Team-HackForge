@@ -66,6 +66,7 @@ const severityNames = ["Low", "Medium", "High", "Critical"];
 
 export function HomeDashboard() {
   const { user } = useSession();
+  const ownerUserId = user?.userId ?? "";
   const { farm } = useActiveFarm();
   const [drafts, setDrafts] = useState<ReportDraft[]>([]);
 
@@ -76,10 +77,12 @@ export function HomeDashboard() {
   });
 
   useEffect(() => {
-    listDrafts()
-      .then((all) => setDrafts(all.filter((d) => d.farmId === farm?.id)))
-      .catch(() => setDrafts([]));
-  }, [farm?.id]);
+    let cancelled = false;
+    listDrafts(ownerUserId)
+      .then((all) => { if (!cancelled) setDrafts(all.filter((d) => d.farmId === farm?.id)); })
+      .catch(() => { if (!cancelled) setDrafts([]); });
+    return () => { cancelled = true; };
+  }, [farm?.id, ownerUserId]);
 
   const now = new Date();
 
@@ -102,7 +105,7 @@ export function HomeDashboard() {
       ) : overview.isError ? (
         <ErrorState error={overview.error} onRetry={() => void overview.refetch()} />
       ) : (
-        <DashboardBody data={overview.data} drafts={drafts} />
+        <DashboardBody data={overview.data} drafts={drafts.filter((draft) => draft.ownerUserId === ownerUserId && draft.farmId === farm?.id)} />
       )}
     </div>
   );

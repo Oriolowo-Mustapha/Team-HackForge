@@ -104,7 +104,7 @@ function Evidence({ o }: { o: ObservationDetail }) {
       )}
       {o.rawTranscript && (
         <Card>
-          <CardTitle action={<FileAudio className="size-4 text-faint" aria-hidden />}>Voice note transcript</CardTitle>
+          <CardTitle action={<FileAudio className="size-4 text-faint" aria-hidden />}>{o.inputChannels?.includes("voice") ? "Voice note and report text" : "Original report text"}</CardTitle>
           <blockquote className="border-l-[3px] border-beige pl-4 text-[15px] italic leading-relaxed text-ink-3">{o.rawTranscript}</blockquote>
           <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
             {languageName(o.detectedLanguage) && (
@@ -247,7 +247,7 @@ function ReviewForm({ o, onConfirmed }: { o: ObservationDetail; onConfirmed: (r:
 
       <Card>
         <CardTitle>How urgent is it?</CardTitle>
-        <p className="-mt-1 mb-3 text-sm text-muted">FarmHand suggests an urgency when you confirm. If you already know, choose it — High or Critical opens a case.</p>
+        <p className="-mt-1 mb-3 text-sm text-muted">FarmHand suggests an urgency when you confirm. You can raise the urgency; safety checks keep serious warning signs from being downgraded. High or Critical opens a case.</p>
         <ChoiceChips
           label="Urgency"
           value={urgency}

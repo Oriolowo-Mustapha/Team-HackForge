@@ -44,6 +44,7 @@ public class PaymentRepository : EfRepository<Payment>, IPaymentRepository
         var total = await query.CountAsync(ct);
         var items = await query
             .OrderByDescending(r => r.P.CreatedAt)
+            .ThenBy(r => r.P.Id)
             .Skip(search.Paging.Skip)
             .Take(search.Paging.PageSize)
             .AsNoTracking()
@@ -61,5 +62,13 @@ public class PaymentRepository : EfRepository<Payment>, IPaymentRepository
         var ids = vetRequestIds.Distinct().ToList();
         if (ids.Count == 0) return [];
         return await DbSet.Where(p => ids.Contains(p.VetRequestId)).OrderByDescending(p => p.CreatedAt).ToListAsync(ct);
+    }
+
+    public async Task<IReadOnlySet<Guid>> GetPaidRequestIdsAsync(IEnumerable<Guid> vetRequestIds, CancellationToken ct = default)
+    {
+        var ids = vetRequestIds.Distinct().ToList();
+        if (ids.Count == 0) return new HashSet<Guid>();
+        return (await DbSet.AsNoTracking().Where(p => ids.Contains(p.VetRequestId) && p.Status == PaymentStatus.Completed)
+            .Select(p => p.VetRequestId).Distinct().ToListAsync(ct)).ToHashSet();
     }
 }

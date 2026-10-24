@@ -62,6 +62,19 @@ public class CreateIncidentCommandHandler : IRequestHandler<CreateIncidentComman
                 throw new ArgumentException("The selected category does not belong to this farm.");
         }
 
+        if (request.SourceObservationId is { } observationId)
+        {
+            var observation = await _unitOfWork.PoultryObservations.GetByIdAsync(observationId, ct);
+            // A reference is data, not proof of authorization. Never attach another farm's report.
+            if (observation is null || observation.FarmId != request.FarmId)
+                throw Common.Exceptions.PublicException.BadRequest("The source report does not belong to this farm.");
+            if (observation.IsPending)
+                throw Common.Exceptions.PublicException.Conflict("Confirm the source report before opening a case.");
+            if (observation.LivestockAnimalId != request.LivestockAnimalId
+                || observation.LivestockCategoryId != request.LivestockCategoryId)
+                throw Common.Exceptions.PublicException.BadRequest("The source report must concern the selected animal or group.");
+        }
+
         var incident = new Incident(
             request.FarmId,
             request.LivestockAnimalId,
@@ -86,6 +99,7 @@ public class CreateIncidentCommandValidator : AbstractValidator<CreateIncidentCo
     public CreateIncidentCommandValidator()
     {
         RuleFor(x => x.FarmId).NotEqual(Guid.Empty);
+        RuleFor(x => x.Severity).IsInEnum();
         RuleFor(x => x)
             .Must(x => x.LivestockAnimalId is not null || x.LivestockCategoryId is not null)
             .WithMessage("Provide either a livestock animal or a category.");

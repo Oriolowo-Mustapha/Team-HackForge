@@ -46,8 +46,8 @@ public static class ConfigurationValidator
         Require("Brevo:ApiKey");
         Require("Brevo:FromAddress");
         var storage = configuration["Storage:Provider"];
-        if (string.Equals(storage, "Local", StringComparison.OrdinalIgnoreCase)) Require("Storage:LocalPath");
-        else if (!CloudinaryImageStorage.IsConfigured(configuration))
-            throw new InvalidOperationException("Configure Cloudinary storage or Storage:Provider=Local with a persistent Storage:LocalPath.");
+        if (!string.Equals(storage, "Local", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Production requires Storage:Provider=Local with a persistent Storage:LocalPath behind authorized media access. Public Cloudinary delivery is disabled until private cloud delivery is implemented.");
+        Require("Storage:LocalPath");
     }
 }

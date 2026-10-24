@@ -194,6 +194,7 @@ function RequestCard({ request, incidentId }: { request: VetRequest; incidentId:
       setDialog(null);
       await invalidate();
     },
+    onError: (error) => toast.error(error instanceof Error ? error.message : "The request could not be cancelled. Please try again."),
   });
   const complete = useMutation({
     mutationFn: () => vetsApi.complete(request.id, notes.trim() || null),

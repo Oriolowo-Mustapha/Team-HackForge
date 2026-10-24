@@ -42,13 +42,7 @@ export function AuthFrame({
   );
 }
 
-/** Only same-site relative paths are accepted as post-login destinations (prevents open redirects). */
-export function safeNext(value: string | string[] | undefined): string | null {
-  const next = Array.isArray(value) ? value[0] : value;
-  if (!next || !next.startsWith("/") || next.startsWith("//") || next.startsWith("/\\")) return null;
-  if (next.startsWith("/login") || next.startsWith("/register") || next.startsWith("/api")) return null;
-  return next;
-}
+export { safeNext } from "@/lib/safe-next";
 
 export const PASSWORD_HINT = "At least 8 characters, with a letter and a number.";
 

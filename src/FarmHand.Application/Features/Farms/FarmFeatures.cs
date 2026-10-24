@@ -21,9 +21,10 @@ public class GetMyFarmsQueryHandler : IRequestHandler<GetMyFarmsQuery, IReadOnly
     {
         if (_currentUser.UserId is not { } userId) return [];
         var farms = await _unitOfWork.Farms.ListByOwnerIdAsync(userId.ToString(), ct);
+        var counts = await _unitOfWork.Farms.GetRecordCountsAsync(farms.Select(f => f.Id).ToList(), DateTime.UtcNow.AddDays(-30), ct);
         var result = new List<FarmSummaryDto>(farms.Count);
         foreach (var farm in farms)
-            result.Add(await FarmSummaries.BuildAsync(farm, _unitOfWork, ct));
+            result.Add(FarmSummaries.Build(farm, counts[farm.Id]));
         return result;
     }
 }
@@ -32,20 +33,22 @@ internal static class FarmSummaries
 {
     public static async Task<FarmSummaryDto> BuildAsync(Farm farm, IUnitOfWork unitOfWork, CancellationToken ct)
     {
-        var categories = (await unitOfWork.LivestockCategories.GetByFarmIdAsync(farm.Id, ct)).ToList();
-        var animals = (await unitOfWork.LivestockAnimals.GetByFarmIdAsync(farm.Id, ct)).Count();
-        var openIncidents = (await unitOfWork.Incidents.GetOpenByFarmIdAsync(farm.Id, ct)).Count();
-        var pending = await unitOfWork.PoultryObservations.CountPendingAsync(farm.Id, ct);
+        var counts = await unitOfWork.Farms.GetRecordCountsAsync([farm.Id], DateTime.UtcNow.AddDays(-30), ct);
+        return Build(farm, counts[farm.Id]);
+    }
+
+    public static FarmSummaryDto Build(Farm farm, FarmRecordCounts counts)
+    {
         return new FarmSummaryDto(
             farm.Id,
             farm.DisplayName,
             farm.Location,
             farm.CreatedAt,
-            categories.Count,
-            animals,
-            categories.Sum(c => c.AnimalCount),
-            openIncidents,
-            pending,
+            counts.Groups,
+            counts.Animals,
+            counts.Headcount,
+            counts.OpenIncidents,
+            counts.PendingObservations,
             farm.Latitude,
             farm.Longitude,
             farm.CityOrTown,
@@ -159,10 +162,12 @@ public class GetFarmOverviewQueryHandler : IRequestHandler<GetFarmOverviewQuery,
         var farm = await _unitOfWork.Farms.GetByIdAsync(request.FarmId, ct) ?? throw PublicException.NotFound("Farm not found.");
         var now = DateTime.UtcNow;
 
-        var categories = (await _unitOfWork.LivestockCategories.GetByFarmIdAsync(farm.Id, ct)).ToList();
-        var animalCount = (await _unitOfWork.LivestockAnimals.GetByFarmIdAsync(farm.Id, ct)).Count();
-        var incidents = (await _unitOfWork.Incidents.GetByFarmIdAsync(farm.Id, ct)).ToList();
-        var open = incidents.Where(i => !i.IsClosed).ToList();
+        var recordCounts = (await _unitOfWork.Farms.GetRecordCountsAsync([farm.Id], now.AddDays(-30), ct))[farm.Id];
+        var open = (await _unitOfWork.Incidents.GetOpenByFarmIdAsync(farm.Id, ct)).ToList();
+        var recentIncidents = await _unitOfWork.Incidents.SearchAsync(
+            new IncidentSearch([farm.Id], null, null, null, false, null, null, now.AddDays(-30), null, null, new Paging(1, 8), NewestFirst: true), ct);
+        var recentResolved = await _unitOfWork.Incidents.SearchAsync(
+            new IncidentSearch([farm.Id], null, IncidentStatus.Resolved, null, false, null, null, null, null, null, new Paging(1, 8), ResolvedSince: now.AddDays(-30)), ct);
         var recentObservations = await _unitOfWork.PoultryObservations.GetByFarmSinceAsync(farm.Id, now.Date.AddDays(-13), ct);
 
         var pendingPage = await _unitOfWork.PoultryObservations.SearchAsync(
@@ -171,19 +176,18 @@ public class GetFarmOverviewQueryHandler : IRequestHandler<GetFarmOverviewQuery,
 
         var requestRows = (await _unitOfWork.VetRequests.SearchAsync(
             new VetRequestSearch([farm.Id], null, null, null, null, new Paging(1, 50)), ct)).Items;
-        var activeRows = requestRows.Where(r => r.Request.IsActive).ToList();
+        var activeRows = (await _unitOfWork.VetRequests.GetActiveByFarmAsync(farm.Id, ct)).ToList();
         var activeRequests = await _requests.ProjectAsync(activeRows.Take(5).ToList(), ct);
+        var paidRequestIds = await _unitOfWork.Payments.GetPaidRequestIdsAsync(activeRows.Select(r => r.Request.Id), ct);
 
         // Reminders: incident follow-up dates and incomplete treatment steps.
         var reminders = open
             .Where(i => i.FollowUpDate is not null)
             .Select(i => new FollowUpReminderDto(i.Id, $"Follow up: {i.IncidentType}", i.FollowUpDate!.Value, "follow_up", i.FollowUpDate < now))
             .ToList();
-        var plans = await _unitOfWork.TreatmentPlans.GetByVetRequestIdsAsync(requestRows.Select(r => r.Request.Id), ct);
-        var steps = await _unitOfWork.TreatmentPlans.GetScheduleItemsAsync(plans.Select(p => p.Id), ct);
-        var planToIncident = plans.ToDictionary(p => p.Id, p => requestRows.First(r => r.Request.Id == p.VetRequestId).Request.IncidentId);
-        reminders.AddRange(steps.Where(s => !s.IsCompleted).Select(s =>
-            new FollowUpReminderDto(planToIncident[s.TreatmentPlanId], s.Action, s.DueDate, "treatment", s.DueDate < now)));
+        var steps = await _unitOfWork.TreatmentPlans.GetPendingByFarmAsync(farm.Id, 6, ct);
+        reminders.AddRange(steps.Select(s =>
+            new FollowUpReminderDto(s.IncidentId, s.Action, s.DueDate, "treatment", s.DueDate < now)));
         reminders = reminders.OrderBy(r => r.DueAt).Take(6).ToList();
 
         // Recent activity from real records.
@@ -191,8 +195,8 @@ public class GetFarmOverviewQueryHandler : IRequestHandler<GetFarmOverviewQuery,
         activity.AddRange(recentObservations.Take(6).Select(o => new ActivityDto(o.RecordedAt, "observation",
             o.IsPending ? "Report waiting for review" : "Health report confirmed",
             o.FarmerNotes, o.Id, null)));
-        activity.AddRange(incidents.Where(i => i.DetectedAt >= now.AddDays(-30)).Select(i => new ActivityDto(i.DetectedAt, "incident", $"Case opened: {i.IncidentType}", i.EvidenceSummary, i.Id, i.Severity)));
-        activity.AddRange(incidents.Where(i => i.ResolvedAt is not null && i.ResolvedAt >= now.AddDays(-30)).Select(i => new ActivityDto(i.ResolvedAt!.Value, "resolved", $"Case resolved: {i.IncidentType}", null, i.Id, i.Severity)));
+        activity.AddRange(recentIncidents.Items.Select(i => new ActivityDto(i.DetectedAt, "incident", $"Case opened: {i.IncidentType}", i.EvidenceSummary, i.Id, i.Severity)));
+        activity.AddRange(recentResolved.Items.Where(i => i.ResolvedAt >= now.AddDays(-30)).Select(i => new ActivityDto(i.ResolvedAt!.Value, "resolved", $"Case resolved: {i.IncidentType}", null, i.Id, i.Severity)));
         activity.AddRange(requestRows.Where(r => r.Request.RespondedAt is not null).Select(r => new ActivityDto(r.Request.RespondedAt!.Value, "vet", "A vet accepted your request", null, r.Request.IncidentId, null)));
 
         var days = Enumerable.Range(0, 14).Select(offset => DateOnly.FromDateTime(now.Date.AddDays(-13 + offset))).ToList();
@@ -200,17 +204,17 @@ public class GetFarmOverviewQueryHandler : IRequestHandler<GetFarmOverviewQuery,
         var last14 = days.Select(d => byDay.TryGetValue(d, out var v) ? new DailyCountDto(d, v.Count, v.Deaths) : new DailyCountDto(d, 0, 0)).ToList();
 
         var counts = new DashboardCountsDto(
-            animalCount,
-            categories.Sum(c => c.AnimalCount),
-            categories.Count,
+            recordCounts.Animals,
+            recordCounts.Headcount,
+            recordCounts.Groups,
             open.Count,
             open.Count(i => i.Severity >= Severity.High),
             pendingPage.TotalCount,
             activeRows.Count,
             recentObservations.Count(o => o.RecordedAt >= now.AddDays(-7)),
-            incidents.Count(i => i.ResolvedAt is not null && i.ResolvedAt >= now.AddDays(-30)));
+            recordCounts.RecentlyResolved);
 
-        var (nextAction, nextKind) = ChooseNextAction(counts, open, activeRows, pending, reminders, categories.Count, incidents.Count, recentObservations.Count);
+        var (nextAction, nextKind) = ChooseNextAction(counts, open, activeRows, paidRequestIds, pending, reminders, recordCounts.Groups, recordCounts.Incidents, recentObservations.Count);
 
         return new FarmDashboardDto(
             new FarmDto(farm.Id, farm.OwnerId, farm.DisplayName, farm.Location, farm.CreatedAt,
@@ -231,6 +235,7 @@ public class GetFarmOverviewQueryHandler : IRequestHandler<GetFarmOverviewQuery,
         DashboardCountsDto counts,
         List<Incident> open,
         List<VetRequestRow> activeRows,
+        IReadOnlySet<Guid> paidRequestIds,
         IReadOnlyList<ObservationSummaryDto> pending,
         List<FollowUpReminderDto> reminders,
         int groups,
@@ -247,7 +252,8 @@ public class GetFarmOverviewQueryHandler : IRequestHandler<GetFarmOverviewQuery,
         if (pending.Count > 0)
             return ("You have a health report waiting for your review.", "review_observation");
 
-        var unpaid = activeRows.FirstOrDefault(r => r.Request.Status == RequestStatus.Responded && r.Request.FarmerCost.Amount > 0);
+        var unpaid = activeRows.FirstOrDefault(r => r.Request.Status == RequestStatus.Responded
+            && r.Request.FarmerCost.Amount > 0 && !paidRequestIds.Contains(r.Request.Id));
         if (unpaid is not null)
             return ("A vet accepted your request. Review the fee and pay to confirm the visit.", "pay");
 

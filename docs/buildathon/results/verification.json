@@ -1,0 +1,217 @@
+{
+  "ApplicationRevision": "dd483898f13f3a7f157781ba791ec7b76d4a0e16",
+  "BrowserFixtureRevision": "eb73e5ccbbfe94d3b069c02a4268a6f4b0218e40",
+  "BackendPassed": 75,
+  "BackendSkipped": 0,
+  "FrontendUnitPassed": 6,
+  "BrowserStats": {
+    "startTime": "2026-10-24T16:47:49.355Z",
+    "duration": 131455.06000000003,
+    "expected": 18,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  },
+  "BrowserCases": [
+    {
+      "Name": "public pages, form validation, and static assets",
+      "Project": "chromium",
+      "Outcome": "expected",
+      "Runs": [
+        {
+          "Status": "passed",
+          "DurationMs": 1632
+        }
+      ]
+    },
+    {
+      "Name": "farmer can sign in and open every primary navigation screen",
+      "Project": "chromium",
+      "Outcome": "expected",
+      "Runs": [
+        {
+          "Status": "passed",
+          "DurationMs": 5235
+        }
+      ]
+    },
+    {
+      "Name": "vet can sign in and open every primary navigation screen",
+      "Project": "chromium",
+      "Outcome": "expected",
+      "Runs": [
+        {
+          "Status": "passed",
+          "DurationMs": 4445
+        }
+      ]
+    },
+    {
+      "Name": "admin can sign in and open every primary navigation screen",
+      "Project": "chromium",
+      "Outcome": "expected",
+      "Runs": [
+        {
+          "Status": "passed",
+          "DurationMs": 5184
+        }
+      ]
+    },
+    {
+      "Name": "new farmer registration and first-farm setup",
+      "Project": "chromium",
+      "Outcome": "expected",
+      "Runs": [
+        {
+          "Status": "passed",
+          "DurationMs": 3975
+        }
+      ]
+    },
+    {
+      "Name": "permissions, CSRF, and complete clinical/payment lifecycle",
+      "Project": "chromium",
+      "Outcome": "expected",
+      "Runs": [
+        {
+          "Status": "passed",
+          "DurationMs": 4614
+        }
+      ]
+    },
+    {
+      "Name": "administrator onboarding enforces temporary passwords and revokes deactivated accounts",
+      "Project": "chromium",
+      "Outcome": "expected",
+      "Runs": [
+        {
+          "Status": "passed",
+          "DurationMs": 1493
+        }
+      ]
+    },
+    {
+      "Name": "offline navigation uses a public fallback",
+      "Project": "chromium",
+      "Outcome": "expected",
+      "Runs": [
+        {
+          "Status": "passed",
+          "DurationMs": 1370
+        }
+      ]
+    },
+    {
+      "Name": "farmer dashboard fits a phone and exposes mobile navigation",
+      "Project": "chromium",
+      "Outcome": "expected",
+      "Runs": [
+        {
+          "Status": "passed",
+          "DurationMs": 1707
+        }
+      ]
+    },
+    {
+      "Name": "GPS locations accept zero coordinates and survive a farm-name edit",
+      "Project": "chromium",
+      "Outcome": "expected",
+      "Runs": [
+        {
+          "Status": "passed",
+          "DurationMs": 4050
+        }
+      ]
+    },
+    {
+      "Name": "farmer and vet finish the clinical workflow through the interface",
+      "Project": "chromium",
+      "Outcome": "expected",
+      "Runs": [
+        {
+          "Status": "passed",
+          "DurationMs": 11568
+        }
+      ]
+    },
+    {
+      "Name": "offline drafts return to their original farm and explicit zero survives analysis",
+      "Project": "chromium",
+      "Outcome": "expected",
+      "Runs": [
+        {
+          "Status": "passed",
+          "DurationMs": 3517
+        }
+      ]
+    },
+    {
+      "Name": "blocked device storage is visible and closing preserves the unsaved form",
+      "Project": "chromium",
+      "Outcome": "expected",
+      "Runs": [
+        {
+          "Status": "passed",
+          "DurationMs": 2621
+        }
+      ]
+    },
+    {
+      "Name": "session-probe expiry clears private drafts before another account signs in",
+      "Project": "chromium",
+      "Outcome": "expected",
+      "Runs": [
+        {
+          "Status": "passed",
+          "DurationMs": 4237
+        }
+      ]
+    },
+    {
+      "Name": "another account cannot read drafts when device cleanup fails transiently",
+      "Project": "chromium",
+      "Outcome": "expected",
+      "Runs": [
+        {
+          "Status": "passed",
+          "DurationMs": 65444
+        }
+      ]
+    },
+    {
+      "Name": "offline sign-out reports an active session and reconnecting permits a real sign-out",
+      "Project": "chromium",
+      "Outcome": "expected",
+      "Runs": [
+        {
+          "Status": "passed",
+          "DurationMs": 2460
+        }
+      ]
+    },
+    {
+      "Name": "sign-out everywhere refreshes an expired access cookie and revokes a second session",
+      "Project": "chromium",
+      "Outcome": "expected",
+      "Runs": [
+        {
+          "Status": "passed",
+          "DurationMs": 2784
+        }
+      ]
+    },
+    {
+      "Name": "unconfirmed global revocation clears this device and shows a partial sign-out notice",
+      "Project": "chromium",
+      "Outcome": "expected",
+      "Runs": [
+        {
+          "Status": "passed",
+          "DurationMs": 2750
+        }
+      ]
+    }
+  ],
+  "Coverage": "Not measured",
+  "Scope": "Local synthetic demo; rules and simulated payments; no live providers"
+}

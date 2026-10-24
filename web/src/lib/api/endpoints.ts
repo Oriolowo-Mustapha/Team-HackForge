@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { api } from "./client";
+import { api, notifySessionExpired } from "./client";
 import * as s from "./schemas";
 
 /** Typed wrappers for every FarmHand API call used by the app. */
@@ -14,7 +14,11 @@ const qs = (params: Record<string, string | number | boolean | null | undefined>
 };
 
 export const sessionApi = {
-  get: () => api("/api/session", { schema: s.sessionSchema, quiet401: true }),
+  get: async () => {
+    const session = await api("/api/session", { schema: s.sessionSchema, quiet401: true });
+    if (!session.authenticated && session.expired) notifySessionExpired();
+    return session;
+  },
   login: (email: string, password: string) =>
     api<{ userId: string; email: string; role: string; fullName: string | null; mustChangePassword: boolean }>("/api/session/login", {
       body: { email, password },
@@ -22,7 +26,7 @@ export const sessionApi = {
     }),
   register: (body: { email: string; password: string; fullName: string; phoneNumber?: string }) =>
     api<{ role: string }>("/api/session/register", { body, quiet401: true }),
-  logout: (everywhere = false) => api("/api/session/logout", { body: { everywhere }, quiet401: true }),
+  logout: (everywhere = false) => api<{ signedOut: boolean; everywhereSignedOut: boolean }>("/api/session/logout", { body: { everywhere }, quiet401: true }),
 };
 
 export const authApi = {
@@ -42,9 +46,9 @@ export type TtsResponse = { audioUrl: string; provider: string; voice: string; c
 export const voiceApi = {
   /** Synthesize text to speech via Spitch (with YarnGPT fallback). Returns a data-URI or URL of the audio. */
   speak: (text: string, options: { voice?: string; targetLanguage?: string } = {}) =>
-    api<TtsResponse>("/api/voice/respond", { body: { text, voice: options.voice ?? null, targetLanguage: options.targetLanguage ?? null } }),
+    api<TtsResponse>("voice/respond", { body: { text, voice: options.voice ?? null, targetLanguage: options.targetLanguage ?? null } }),
   /** List available TTS voices. */
-  voices: () => api<{ id: string; name: string; language: string; gender: string; accent: string }[]>("/api/voice/voices"),
+  voices: () => api<{ id: string; name: string; language: string; gender: string; accent: string }[]>("voice/voices"),
 };
 
 export type FarmLocationInput = {
@@ -136,13 +140,11 @@ export const observationsApi = {
     if (input.audio) form.append("audio", input.audio, audioFileName(input.audio.type));
     if (input.image) form.append("image", input.image, "photo.jpg");
     form.append("idempotencyKey", input.idempotencyKey);
-    if (input.manualEntry) {
-      form.append("manualEntry", "true");
-      if (input.mortalityCount !== null && input.mortalityCount !== undefined) form.append("mortalityCount", String(input.mortalityCount));
-      if (input.waterConsumption) form.append("waterConsumption", input.waterConsumption);
-      if (input.feedConsumption) form.append("feedConsumption", input.feedConsumption);
-      if (input.eggProduction) form.append("eggProduction", input.eggProduction);
-    }
+    if (input.manualEntry) form.append("manualEntry", "true");
+    if (input.mortalityCount !== null && input.mortalityCount !== undefined) form.append("mortalityCount", String(input.mortalityCount));
+    if (input.waterConsumption) form.append("waterConsumption", input.waterConsumption);
+    if (input.feedConsumption) form.append("feedConsumption", input.feedConsumption);
+    if (input.eggProduction) form.append("eggProduction", input.eggProduction);
     return api("observations", { formData: form, schema: s.observationDetailSchema, idempotencyKey: input.idempotencyKey, ...options });
   },
   confirm: (

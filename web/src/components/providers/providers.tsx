@@ -1,7 +1,7 @@
 "use client";
 
 import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Toaster } from "sonner";
 import { ApiError, onSessionExpired } from "@/lib/api/client";
 import { qk } from "@/lib/queries";
@@ -17,6 +17,7 @@ function shouldRetry(failureCount: number, error: unknown) {
 }
 
 export function Providers({ children }: { children: ReactNode }) {
+  const expiring = useRef(false);
   const [client] = useState(
     () =>
       new QueryClient({
@@ -32,13 +33,18 @@ export function Providers({ children }: { children: ReactNode }) {
   useEffect(
     () =>
       onSessionExpired(() => {
-        void clearLocalData();
+        if (expiring.current) return;
+        expiring.current = true;
         client.clear();
         client.setQueryData(qk.session, { authenticated: false, expired: true });
         const next = encodeURIComponent(window.location.pathname + window.location.search);
+        const redirect = !window.location.pathname.startsWith("/login");
         // A full page load guarantees no signed-in client state survives an expired session.
-        // eslint-disable-next-line @next/next/no-location-assign-relative-destination
-        if (!window.location.pathname.startsWith("/login")) window.location.assign(`/login?expired=1&next=${next}`);
+        void clearLocalData().finally(() => {
+          // eslint-disable-next-line @next/next/no-location-assign-relative-destination
+          if (redirect) window.location.assign(`/login?expired=1&next=${next}`);
+          else expiring.current = false;
+        });
       }),
     [client],
   );

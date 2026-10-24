@@ -22,6 +22,7 @@ export function SubjectPicker({ farmId, value, onChange }: { farmId: string; val
 
   if (groups.isPending || animals.isPending) return <ListSkeleton rows={4} />;
   if (groups.isError) return <ErrorState error={groups.error} onRetry={() => void groups.refetch()} />;
+  if (animals.isError) return <ErrorState error={animals.error} onRetry={() => void animals.refetch()} />;
   if (groups.data.length === 0)
     return (
       <EmptyState icon={<Users />} title="Add a flock or animal first" action={<ButtonLink href="/animals">Go to Animals</ButtonLink>}>

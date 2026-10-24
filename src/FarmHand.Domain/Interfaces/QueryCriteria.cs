@@ -14,7 +14,7 @@ public readonly record struct Paging
 
     public int Page { get; }
     public int PageSize { get; }
-    public int Skip => (Page - 1) * PageSize;
+    public int Skip => (int)Math.Min((long)(Page - 1) * PageSize, int.MaxValue);
 }
 
 public record ObservationSearch(
@@ -35,7 +35,10 @@ public record IncidentSearch(
     DateTime? From,
     DateTime? To,
     string? Text,
-    Paging Paging);
+    Paging Paging,
+    Guid? AssignedVetPartnerId = null,
+    bool NewestFirst = false,
+    DateTime? ResolvedSince = null);
 
 /// <summary>
 /// Vet request filter. <see cref="FarmIds"/> restricts to farms (farmer scope);

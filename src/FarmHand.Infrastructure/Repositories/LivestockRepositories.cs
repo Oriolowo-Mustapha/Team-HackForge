@@ -63,6 +63,10 @@ public class PoultryObservationRepository : EfRepository<PoultryObservation>, IP
 {
     public PoultryObservationRepository(FarmHandDbContext dbContext) : base(dbContext) { }
 
+    public async Task<IReadOnlyList<PoultryObservation>> GetRecentForAnimalAsync(Guid animalId, int take, CancellationToken ct = default)
+        => await DbSet.AsNoTracking().Where(o => o.LivestockAnimalId == animalId)
+            .OrderByDescending(o => o.RecordedAt).ThenBy(o => o.Id).Take(Math.Clamp(take, 1, 100)).ToListAsync(ct);
+
     public async Task<IEnumerable<PoultryObservation>> GetByAnimalIdAsync(Guid animalId, CancellationToken ct = default)
     {
         return await DbSet.Where(o => o.LivestockAnimalId == animalId).OrderByDescending(o => o.RecordedAt).ToListAsync(ct);
@@ -102,7 +106,7 @@ public class PoultryObservationRepository : EfRepository<PoultryObservation>, IP
         if (search.CategoryId is { } categoryId) query = query.Where(o => o.LivestockCategoryId == categoryId);
 
         var total = await query.CountAsync(ct);
-        var items = await query.OrderByDescending(o => o.RecordedAt).Skip(search.Paging.Skip).Take(search.Paging.PageSize).ToListAsync(ct);
+        var items = await query.OrderByDescending(o => o.RecordedAt).ThenBy(o => o.Id).Skip(search.Paging.Skip).Take(search.Paging.PageSize).ToListAsync(ct);
         return new PagedList<PoultryObservation>(items, total);
     }
 

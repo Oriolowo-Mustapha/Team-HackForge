@@ -47,17 +47,14 @@ public class SearchIncidentsQueryHandler : IRequestHandler<SearchIncidentsQuery,
     public async Task<PagedResult<IncidentListItemDto>> Handle(SearchIncidentsQuery request, CancellationToken ct)
     {
         IReadOnlyCollection<Guid>? farmIds = null;
-        IReadOnlyCollection<Guid>? incidentIds = null;
+        Guid? assignedVetId = null;
         var paging = new Paging(request.Page, request.PageSize);
 
         if (_currentUser.IsVet)
         {
             var vet = await _authorization.GetCurrentVetAsync(ct);
             if (vet is null) return Empty(paging);
-            var assigned = await _unitOfWork.VetRequests.SearchAsync(
-                new VetRequestSearch(null, vet.Id, null, null, null, new Paging(1, 100)), ct);
-            incidentIds = assigned.Items.Select(r => r.Request.IncidentId).Distinct().ToList();
-            if (incidentIds.Count == 0) return Empty(paging);
+            assignedVetId = vet.Id;
         }
         else if (request.FarmId is { } farmId)
         {
@@ -73,8 +70,8 @@ public class SearchIncidentsQueryHandler : IRequestHandler<SearchIncidentsQuery,
             farmIds = [vetFarm];
 
         var page = await _unitOfWork.Incidents.SearchAsync(new IncidentSearch(
-            farmIds, incidentIds, request.Status, request.Severity, request.OpenOnly,
-            request.AnimalId, request.CategoryId, request.From, request.To, request.Q, paging), ct);
+            farmIds, null, request.Status, request.Severity, request.OpenOnly,
+            request.AnimalId, request.CategoryId, request.From, request.To, request.Q, paging, assignedVetId), ct);
 
         var incidents = page.Items;
         var farms = (await _unitOfWork.Farms.GetByIdsAsync(incidents.Select(i => i.FarmId), ct)).ToDictionary(f => f.Id);
@@ -148,7 +145,9 @@ public class GetIncidentCaseQueryHandler : IRequestHandler<GetIncidentCaseQuery,
         var owner = Guid.TryParse(farm.OwnerId, out var ownerId) ? await _unitOfWork.Users.GetByIdAsync(ownerId, ct) : null;
 
         ObservationDetailDto? source = null;
-        if (incident.SourceObservationId is { } observationId && await _unitOfWork.PoultryObservations.GetByIdAsync(observationId, ct) is { } observation)
+        if (incident.SourceObservationId is { } observationId
+            && await _unitOfWork.PoultryObservations.GetByIdAsync(observationId, ct) is { } observation
+            && observation.FarmId == incident.FarmId)
             source = await _observations.DetailAsync(observation, reused: false, ct);
 
         var currentVet = await _authorization.GetCurrentVetAsync(ct);

@@ -1,8 +1,9 @@
 "use client";
 
 import { Eye, EyeOff } from "lucide-react";
-import { cloneElement, forwardRef, isValidElement, useId, useState, type InputHTMLAttributes, type ReactElement, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from "react";
+import { cloneElement, forwardRef, isValidElement, useId, useRef, useState, type InputHTMLAttributes, type ReactElement, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from "react";
 import { cn } from "@/lib/cn";
+import { selectionIndex } from "@/lib/selection-keyboard";
 
 const control =
   "w-full rounded-2xl border border-line bg-paper px-4 text-[15px] text-ink placeholder:text-faint/80 transition-[border-color,box-shadow] outline-none focus:border-ink focus:ring-4 focus:ring-ink/8 disabled:opacity-60 aria-[invalid=true]:border-red aria-[invalid=true]:focus:ring-red/15";
@@ -97,17 +98,28 @@ export function ChoiceChips<T extends string | number>({
   label: string;
   className?: string;
 }) {
+  const buttons = useRef<(HTMLButtonElement | null)[]>([]);
+  const selectedIndex = Math.max(0, options.findIndex((option) => option.value === value));
   return (
     <div role="radiogroup" aria-label={label} className={cn("flex flex-wrap gap-2", className)}>
-      {options.map((option) => {
+      {options.map((option, index) => {
         const selected = option.value === value;
         return (
           <button
             key={String(option.value)}
+            ref={(element) => { buttons.current[index] = element; }}
             type="button"
             role="radio"
             aria-checked={selected}
+            tabIndex={index === selectedIndex ? 0 : -1}
             onClick={() => onChange(option.value)}
+            onKeyDown={(event) => {
+              const next = selectionIndex(event.key, index, options.length);
+              if (next === null) return;
+              event.preventDefault();
+              buttons.current[next]?.focus();
+              onChange(options[next]!.value);
+            }}
             className={cn(
               "min-h-11 rounded-2xl border px-4 py-2 text-left text-sm font-semibold transition-colors",
               selected ? "border-ink bg-ink text-cream" : "border-line bg-paper text-ink hover:bg-sand",

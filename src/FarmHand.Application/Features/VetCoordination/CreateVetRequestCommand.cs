@@ -104,9 +104,11 @@ public class CreateVetRequestCommandHandler : IRequestHandler<CreateVetRequestCo
         if (!_emailService.IsEnabled)
             return;
 
+        using var budget = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        budget.CancelAfter(TimeSpan.FromSeconds(5));
         try
         {
-            var allVets = await _vetPartnerRepository.GetActiveAsync(ct);
+            var allVets = await _vetPartnerRepository.GetActiveAsync(budget.Token);
             var recipients = vetRequest.VetPartnerId is { } assignedVetId
                 ? allVets.Where(v => v.Id == assignedVetId).Select(v => v.Email)
                 : allVets.Select(v => v.Email);
@@ -114,12 +116,17 @@ public class CreateVetRequestCommandHandler : IRequestHandler<CreateVetRequestCo
             var subject = $"New FarmHand case: {incident.Severity} severity";
             foreach (var email in recipients)
             {
-                await _emailService.SendAsync(new EmailMessage(email, subject, BuildHtmlBody(vetRequest, incident)), ct);
+                budget.Token.ThrowIfCancellationRequested();
+                await _emailService.SendAsync(new EmailMessage(email, subject, BuildHtmlBody(vetRequest, incident)), budget.Token);
             }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to notify vets about vet request {VetRequestId}", vetRequest.Id);
+            _logger.LogWarning("Best-effort vet notifications stopped for request {VetRequestId} ({Failure})", vetRequest.Id, ex.GetType().Name);
         }
     }
 

@@ -274,7 +274,7 @@ public class GetAnimalQueryHandler : IRequestHandler<GetAnimalQuery, AnimalDetai
             ?? throw PublicException.NotFound("Animal not found.");
         await _authorization.EnsureFarmAccessAsync(animal.FarmId, ct);
 
-        var observations = (await _unitOfWork.PoultryObservations.GetByAnimalIdAsync(animal.Id, ct)).Take(30).ToList();
+        var observations = await _unitOfWork.PoultryObservations.GetRecentForAnimalAsync(animal.Id, 30, ct);
         var incidents = await _unitOfWork.Incidents.SearchAsync(
             new IncidentSearch([animal.FarmId], null, null, null, false, animal.Id, null, null, null, null, new Paging(1, 50)), ct);
 

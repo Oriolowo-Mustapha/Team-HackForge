@@ -12,12 +12,14 @@ import { cn } from "@/lib/cn";
 import { deleteDraft, getDraft, saveDraft, type ReportDraft } from "@/lib/drafts";
 import { useActiveFarm } from "@/lib/hooks/use-active-farm";
 import { useOnline } from "@/lib/hooks/use-online";
-import { useSystemInfo } from "@/lib/hooks/use-session";
+import { useSession, useSystemInfo } from "@/lib/hooks/use-session";
 import { qk } from "@/lib/queries";
+import { selectionIndex } from "@/lib/selection-keyboard";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/dialog";
 import { Field, Input, Textarea } from "@/components/ui/field";
-import { InlineError, Notice } from "@/components/ui/states";
+import { ErrorState, InlineError, Notice } from "@/components/ui/states";
+import { Spinner } from "@/components/ui/spinner";
 import { AnalysisProgress, type Stage } from "./analysis-progress";
 import { CameraCapture } from "./camera-capture";
 import { DraftsList } from "./drafts-list";
@@ -36,12 +38,16 @@ export function Scanner({ initial, draftId, showDrafts }: { initial: { group?: s
   const client = useQueryClient();
   const online = useOnline();
   const system = useSystemInfo();
-  const { farm } = useActiveFarm();
-  const farmId = farm?.id ?? "";
+  const { user } = useSession();
+  const ownerUserId = user?.userId ?? "";
+  const { farm, farms, setFarm } = useActiveFarm();
+  const ownedFarmIds = farms.map((owned) => owned.id).join(",");
+  const [reportFarmId, setReportFarmId] = useState<string | null>(null);
+  const farmId = reportFarmId ?? farm?.id ?? "";
 
   const [id, setId] = useState(() => newIdempotencyKey("draft"));
   const [idempotencyKey, setIdempotencyKey] = useState(() => newIdempotencyKey("obs"));
-  const [createdAt] = useState(() => Date.now());
+  const [createdAt, setCreatedAt] = useState(() => Date.now());
   const [subject, setSubject] = useState<Subject | null>(null);
   const [phase, setPhase] = useState<Phase>("subject");
   const [mode, setMode] = useState<Mode>("photo");
@@ -56,7 +62,13 @@ export function Scanner({ initial, draftId, showDrafts }: { initial: { group?: s
   const [aiDown, setAiDown] = useState<string | null>(null);
   const [manualOnly, setManualOnly] = useState(false);
   const [draftsOpen, setDraftsOpen] = useState(Boolean(showDrafts));
+  const [restoring, setRestoring] = useState(Boolean(draftId));
+  const [restoreError, setRestoreError] = useState<unknown>(null);
+  const [storageError, setStorageError] = useState<unknown>(null);
+  const [draftSaved, setDraftSaved] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
+  const sendingRef = useRef(false);
+  const restoredDraftRef = useRef<string | null>(null);
 
   // Preselect the subject from ?group= / ?animal=, or restore a saved draft.
   const groups = useQuery({ queryKey: qk.groups(farmId), queryFn: () => livestockApi.groups(farmId), enabled: Boolean(farmId) });
@@ -64,12 +76,19 @@ export function Scanner({ initial, draftId, showDrafts }: { initial: { group?: s
 
   // Restore a saved draft (async, from IndexedDB).
   useEffect(() => {
-    if (!draftId) return;
+    if (!draftId || !ownerUserId || restoredDraftRef.current === `${ownerUserId}:${draftId}`) return;
     let cancelled = false;
-    void getDraft(draftId).then((d) => {
-      if (!d || cancelled) return;
+    void getDraft(draftId, ownerUserId).then((d) => {
+      if (cancelled) return;
+      if (!d) throw new Error("This draft is no longer on this device. Start a new report.");
+      if (!ownedFarmIds.split(",").includes(d.farmId)) throw new Error("This draft belongs to a farm that is not available to your account.");
+      restoredDraftRef.current = `${ownerUserId}:${draftId}`;
+      // Pin the report before enabling autosave; the active farm may have changed since it was written.
+      setReportFarmId(d.farmId);
+      setFarm(d.farmId);
       setId(d.id);
       setIdempotencyKey(d.idempotencyKey);
+      setCreatedAt(d.createdAt);
       setSubject({ kind: d.subjectKind, id: d.subjectId, name: d.subjectName, species: null });
       setText(d.text);
       setImage(d.image);
@@ -81,11 +100,17 @@ export function Scanner({ initial, draftId, showDrafts }: { initial: { group?: s
       }
       setMode(d.image ? "photo" : d.audio ? "voice" : "text");
       setPhase("capture");
+      setDraftSaved(true);
+      setRestoring(false);
+    }).catch((error) => {
+      if (cancelled) return;
+      setRestoreError(error);
+      setRestoring(false);
     });
     return () => {
       cancelled = true;
     };
-  }, [draftId]);
+  }, [draftId, ownerUserId, ownedFarmIds, setFarm]);
 
   // Preselect the subject from ?animal= / ?group= (or the only group) once the lists have loaded.
   const [preselected, setPreselected] = useState(Boolean(draftId));
@@ -111,11 +136,12 @@ export function Scanner({ initial, draftId, showDrafts }: { initial: { group?: s
 
   const toDraft = useCallback(
     (lastError: string | null = null): ReportDraft | null => {
-      if (!subject || !farmId) return null;
+      if (!subject || !farmId || !ownerUserId) return null;
       const deaths = manual.mortalityCount ? Number(manual.mortalityCount) : null;
       const anyManual = manual.mortalityCount || manual.feed || manual.water || manual.eggs;
       return {
         id,
+        ownerUserId,
         idempotencyKey,
         farmId,
         subjectKind: subject.kind,
@@ -131,18 +157,31 @@ export function Scanner({ initial, draftId, showDrafts }: { initial: { group?: s
         updatedAt: Date.now(),
       };
     },
-    [subject, farmId, id, idempotencyKey, text, image, audio, audioMs, manual, createdAt],
+    [subject, farmId, ownerUserId, id, idempotencyKey, text, image, audio, audioMs, manual, createdAt],
   );
+
+  const persistDraft = useCallback(async (draft: ReportDraft): Promise<boolean> => {
+    try {
+      await saveDraft(draft);
+      setStorageError(null);
+      setDraftSaved(true);
+      return true;
+    } catch {
+      setDraftSaved(false);
+      setStorageError(new Error("This device could not save your draft. Keep this screen open and reconnect to send it, or allow browser storage and try again."));
+      return false;
+    }
+  }, []);
 
   // Autosave to this device while the farmer works, so nothing is lost if the tab closes or the signal drops.
   useEffect(() => {
-    if (!hasContent || phase === "sending" || phase === "done") return;
+    if (!hasContent || restoring || restoreError || phase === "sending" || phase === "done") return;
     const timer = setTimeout(() => {
       const draft = toDraft();
-      if (draft) void saveDraft(draft).catch(() => undefined);
+      if (draft) void persistDraft(draft);
     }, 700);
     return () => clearTimeout(timer);
-  }, [hasContent, phase, toDraft]);
+  }, [hasContent, phase, toDraft, restoring, restoreError, persistDraft]);
 
   const stages: Stage[] = useMemo(() => {
     const list: Stage[] = [];
@@ -153,22 +192,22 @@ export function Scanner({ initial, draftId, showDrafts }: { initial: { group?: s
       label: "Pulling out symptoms and numbers",
       detail: aiText ? "AI-assisted, for you to check" : "Rule-based check (no AI provider configured)",
     });
-    list.push({ key: "triage", label: "Suggesting how urgent it looks", detail: "You confirm before anything is saved" });
+    list.push({ key: "review", label: "Preparing your report for review", detail: "Check the details, then confirm for urgency guidance" });
     return list;
   }, [audio, image, transcription, vision, aiText]);
 
   async function send(manualEntry = false) {
-    if (!subject || !farmId) return;
+    if (!subject || !farmId || restoring || restoreError || sendingRef.current) return;
     if (!hasContent) {
       setError(new Error("Add a photo, a voice note or a few words first."));
       return;
     }
     if (!online) {
       const draft = toDraft("You were offline");
-      if (draft) await saveDraft(draft);
-      toast("Saved on this device", { description: "Send it from Report a concern when you're back online." });
+      if (draft && await persistDraft(draft)) toast("Saved on this device", { description: "Send it from Report a concern when you're back online." });
       return;
     }
+    sendingRef.current = true;
     setError(null);
     setAiDown(null);
     setUpload(0);
@@ -187,10 +226,10 @@ export function Scanner({ initial, draftId, showDrafts }: { initial: { group?: s
           image,
           idempotencyKey,
           manualEntry,
-          mortalityCount: manualEntry ? deaths : null,
-          feedConsumption: manualEntry ? manual.feed || null : null,
-          waterConsumption: manualEntry ? manual.water || null : null,
-          eggProduction: manualEntry ? manual.eggs || null : null,
+          mortalityCount: deaths,
+          feedConsumption: manual.feed || null,
+          waterConsumption: manual.water || null,
+          eggProduction: manual.eggs || null,
         },
         { signal: controller.signal, onUploadProgress: setUpload },
       );
@@ -203,30 +242,35 @@ export function Scanner({ initial, draftId, showDrafts }: { initial: { group?: s
       setPhase("capture");
       if (err instanceof DOMException && err.name === "AbortError") {
         const draft = toDraft("Stopped before sending finished");
-        if (draft) await saveDraft(draft);
-        toast("Kept as a draft on this device");
+        if (draft && await persistDraft(draft)) toast("Kept as a draft on this device");
         return;
       }
       const message = err instanceof ApiError ? err.userMessage : "The report could not be sent.";
       const draft = toDraft(message);
-      if (draft) await saveDraft(draft).catch(() => undefined);
+      if (draft) await persistDraft(draft);
       if (err instanceof ApiError && err.code === "ai_unavailable") {
         setAiDown(err.detail ?? err.message);
         return;
       }
       setError(err);
+    } finally {
+      sendingRef.current = false;
     }
   }
 
-  function close() {
+  async function close() {
     if (hasContent && phase !== "done") {
       const draft = toDraft();
-      if (draft) void saveDraft(draft).then(() => toast("Draft saved on this device"));
+      if (draft && !(await persistDraft(draft))) return;
+      if (draft) toast("Draft saved on this device");
     }
     router.push("/home");
   }
 
   // ---- Render ---------------------------------------------------------------------------------
+
+  if (restoring) return <div className="flex min-h-dvh items-center justify-center"><Spinner label="Restoring your draft" /></div>;
+  if (restoreError) return <div className="mx-auto max-w-xl px-4 py-10"><ErrorState error={restoreError} onRetry={() => router.replace("/scan")} /><Link href="/scan" className="mt-4 block text-center font-semibold underline">Start a new report</Link></div>;
 
   if (phase === "sending" || phase === "done") {
     return (
@@ -239,7 +283,7 @@ export function Scanner({ initial, draftId, showDrafts }: { initial: { group?: s
   return (
     <div className="mx-auto flex min-h-dvh max-w-[1100px] flex-col px-4 pb-[calc(24px+env(safe-area-inset-bottom))] pt-[max(12px,env(safe-area-inset-top))] sm:px-6">
       <header className="flex items-center gap-2 py-2">
-        <button type="button" onClick={close} aria-label="Close" className="inline-flex size-11 items-center justify-center rounded-2xl bg-paper shadow-soft hover:bg-white">
+        <button type="button" onClick={() => void close()} aria-label="Close" className="inline-flex size-11 items-center justify-center rounded-2xl bg-paper shadow-soft hover:bg-white">
           <X className="size-5" />
         </button>
         <div className="min-w-0 flex-1 text-center">
@@ -276,7 +320,7 @@ export function Scanner({ initial, draftId, showDrafts }: { initial: { group?: s
         <div className="grid flex-1 gap-5 pt-3 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)] lg:gap-8">
           {/* Scanner panel */}
           <section aria-label="Capture" className="flex flex-col rounded-[34px] bg-ink p-3 text-cream shadow-lift">
-            <div className="h-[min(58dvh,520px)] min-h-[340px] lg:h-[560px]">
+            <div id="report-capture" role="tabpanel" aria-labelledby={`report-tab-${mode}`} className="h-[min(58dvh,520px)] min-h-[340px] lg:h-[560px]">
               {mode === "photo" ? (
                 <CameraCapture image={image} onImage={setImage} />
               ) : mode === "voice" ? (
@@ -320,7 +364,7 @@ export function Scanner({ initial, draftId, showDrafts }: { initial: { group?: s
                       <button
                         key={p}
                         type="button"
-                        onClick={() => setText((t) => (t.trim() ? `${t.trim().replace(/[.,]?$/, ",")} ${p.toLowerCase()}` : p))}
+                        onClick={() => setText((t) => (t.trim() ? `${t.trim().replace(/[.,]?$/, ",")} ${p.toLowerCase()}` : p).slice(0, 2000))}
                         className="rounded-full bg-cream/8 px-3 py-1.5 text-[13px] font-semibold text-cream/85 ring-1 ring-cream/10 hover:bg-cream/14"
                       >
                         + {p}
@@ -344,8 +388,20 @@ export function Scanner({ initial, draftId, showDrafts }: { initial: { group?: s
                   key={tab.key}
                   type="button"
                   role="tab"
+                  id={`report-tab-${tab.key}`}
+                  aria-controls="report-capture"
                   aria-selected={mode === tab.key}
+                  tabIndex={mode === tab.key ? 0 : -1}
                   onClick={() => setMode(tab.key)}
+                  onKeyDown={(event) => {
+                    const modes: Mode[] = ["photo", "voice", "text"];
+                    const next = selectionIndex(event.key, modes.indexOf(tab.key), modes.length);
+                    if (next === null) return;
+                    event.preventDefault();
+                    const selected = modes[next]!;
+                    setMode(selected);
+                    document.getElementById(`report-tab-${selected}`)?.focus();
+                  }}
                   className={cn(
                     "relative inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-full text-sm font-semibold transition-colors",
                     mode === tab.key ? "bg-terracotta text-white" : "text-cream/70 hover:text-cream",
@@ -431,7 +487,7 @@ export function Scanner({ initial, draftId, showDrafts }: { initial: { group?: s
             {aiDown && (
               <div className="space-y-3 rounded-[24px] bg-terracotta-soft p-4 text-terracotta-deep">
                 <p className="font-semibold">Automatic analysis isn&apos;t available right now</p>
-                <p className="text-sm leading-relaxed">{aiDown} Your report is saved on this device.</p>
+                <p className="text-sm leading-relaxed">{aiDown} {draftSaved ? "Your report is saved on this device." : "Keep this screen open until the report is saved or sent."}</p>
                 <div className="flex flex-col gap-2 sm:flex-row">
                   <Button
                     variant="primary"
@@ -454,9 +510,10 @@ export function Scanner({ initial, draftId, showDrafts }: { initial: { group?: s
             )}
 
             <InlineError error={error} />
+            <InlineError error={storageError} />
             {!online && (
               <Notice tone="warning" icon={<CloudOff />}>
-                You&apos;re offline. Your report is saved on this device — send it when you&apos;re connected.
+                You&apos;re offline. {storageError ? "Your draft could not be saved. Keep this screen open." : draftSaved ? "Your report is saved on this device — send it when you're connected." : "Choose Save for later to keep this report on your device."}
               </Notice>
             )}
 
@@ -472,7 +529,7 @@ export function Scanner({ initial, draftId, showDrafts }: { initial: { group?: s
         </div>
       )}
 
-      <Modal open={draftsOpen} onOpenChange={setDraftsOpen} title="Unsent reports" description="Saved on this device only. They're erased when you sign out.">
+      <Modal open={draftsOpen} onOpenChange={setDraftsOpen} title="Unsent reports" description="Saved on this device only and visible only to the account that created them.">
         {farmId && <DraftsList farmId={farmId} />}
         <div className="mt-4 text-center">
           <Link href="/reports" className="text-sm font-semibold text-muted hover:text-ink">

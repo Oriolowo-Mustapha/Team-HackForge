@@ -8,15 +8,16 @@ import { useState, type FormEvent } from "react";
 import { ApiError } from "@/lib/api/client";
 import { sessionApi } from "@/lib/api/endpoints";
 import { useSystemInfo } from "@/lib/hooks/use-session";
-import { qk } from "@/lib/queries";
+import { clearLocalData } from "@/lib/drafts";
 import { homeFor } from "@/lib/roles";
 import { Button } from "@/components/ui/button";
 import { Field, Input, PasswordInput } from "@/components/ui/field";
 import { InlineError, Notice } from "@/components/ui/states";
 
 const notices = {
-  expired: { tone: "warning", text: "Your session ended. Please sign in again — anything you were writing is still saved on this device." },
-  signedOut: { tone: "info", text: "You've signed out. Data kept on this device was cleared." },
+  expired: { tone: "warning", text: "Your session ended. Sign in again. Saved drafts are private to the account that created them." },
+  signedOut: { tone: "info", text: "You've signed out. Saved drafts are private to the account that created them." },
+  partialSignOut: { tone: "warning", text: "Signed out on this device. Sign-out on other devices could not be confirmed. Sign in and try Sign out everywhere again." },
   reset: { tone: "success", text: "Your password was reset. Sign in with your new password." },
   changed: { tone: "success", text: "Password changed. Sign in with your new password." },
 } as const;
@@ -38,6 +39,7 @@ export function LoginForm({ next, notice }: { next: string | null; notice: keyof
 
   async function submit(event: FormEvent) {
     event.preventDefault();
+    if (pending) return;
     if (!email.trim() || !password) {
       setError(new Error("Enter your email and password."));
       return;
@@ -46,7 +48,9 @@ export function LoginForm({ next, notice }: { next: string | null; notice: keyof
     setError(null);
     try {
       const result = await sessionApi.login(email.trim(), password);
-      await client.resetQueries({ queryKey: qk.session });
+      await client.cancelQueries();
+      client.clear();
+      await clearLocalData();
       if (result.mustChangePassword) router.replace("/change-password");
       else router.replace(next ?? homeFor(result.role));
     } catch (err) {

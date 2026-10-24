@@ -15,7 +15,7 @@ export default function OfflinePage() {
       </div>
       <h1 className="mt-5 text-[28px] font-semibold tracking-[-0.03em]">You&apos;re offline</h1>
       <p className="mt-2 max-w-sm text-[15px] leading-relaxed text-muted">
-        This page needs a connection. Health reports you started are saved on this device and can be sent from <strong className="text-ink">Report a concern</strong> once you&apos;re back online.
+        This page needs a connection. If a draft was saved on this device, you can send it from <strong className="text-ink">Report a concern</strong> once you&apos;re back online. Saved drafts are private to the account that created them.
       </p>
       <RetryButton />
     </main>

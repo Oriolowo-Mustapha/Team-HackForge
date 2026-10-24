@@ -163,6 +163,19 @@ public class SubmitObservationCommandHandler : IRequestHandler<SubmitObservation
             extraction = await _ai.ExtractObservationAsync(analysisText, subject.Description, ct);
         }
 
+        // Explicit farmer-entered values take precedence over extraction, including zero deaths.
+        // Keep the extraction's source and detected language for transparent attribution.
+        extraction = extraction with
+        {
+            Fields = extraction.Fields with
+            {
+                MortalityCount = request.MortalityCount ?? extraction.Fields.MortalityCount,
+                WaterConsumption = Blank(request.WaterConsumption) ?? extraction.Fields.WaterConsumption,
+                FeedConsumption = Blank(request.FeedConsumption) ?? extraction.Fields.FeedConsumption,
+                EggProduction = Blank(request.EggProduction) ?? extraction.Fields.EggProduction
+            }
+        };
+
         // 4. Persist the photo only after analysis succeeded, so failed attempts leave nothing behind.
         StoredImage? stored = null;
         if (imageType is not null)

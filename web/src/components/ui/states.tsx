@@ -37,7 +37,7 @@ export function ErrorState({ error, onRetry, className, compact }: { error: unkn
   const apiError = error instanceof ApiError ? error : null;
   let icon = <AlertTriangle />;
   let title = "Something went wrong";
-  let body = apiError?.userMessage ?? "Please try again.";
+  let body = apiError?.userMessage ?? (error instanceof Error ? error.message : "Please try again.");
 
   if (apiError?.isNetwork) {
     icon = <WifiOff />;

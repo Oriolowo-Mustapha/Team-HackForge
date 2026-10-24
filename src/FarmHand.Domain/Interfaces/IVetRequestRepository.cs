@@ -4,6 +4,7 @@ public interface IVetRequestRepository : IRepository<VetRequest>
 {
     Task<IEnumerable<VetRequest>> GetByIncidentIdAsync(Guid incidentId, CancellationToken ct = default);
     Task<IEnumerable<VetRequest>> GetByFarmIdAsync(Guid farmId, CancellationToken ct = default);
+    Task<IReadOnlyList<VetRequestRow>> GetActiveByFarmAsync(Guid farmId, CancellationToken ct = default);
     Task<VetRequest?> GetByIdWithDetailsAsync(Guid vetRequestId, CancellationToken ct = default);
     Task<PagedList<VetRequestRow>> SearchAsync(VetRequestSearch search, CancellationToken ct = default);
     Task<VetRequestRow?> GetRowAsync(Guid vetRequestId, CancellationToken ct = default);

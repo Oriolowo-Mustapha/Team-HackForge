@@ -19,6 +19,10 @@ public class VetRequestConfiguration : IEntityTypeConfiguration<VetRequest>
         builder.Property(x => x.DeclineReason).HasMaxLength(500);
         builder.HasIndex(x => x.VetPartnerId);
         builder.HasIndex(x => x.IncidentId);
+        builder.HasIndex(x => new { x.IncidentId, x.IsDeleted })
+            .HasDatabaseName("IX_VetRequests_OneActivePerIncident")
+            .IsUnique()
+            .HasFilter("\"Status\" IN (0, 1) AND \"IsDeleted\" = FALSE");
         builder.HasIndex(x => x.Status);
 
         builder.HasOne<Incident>()

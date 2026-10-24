@@ -69,6 +69,10 @@ Run the production web build against an isolated seeded API/database, set `E2E_P
 
 ## Production
 
-Follow [DEPLOYMENT.md](DEPLOYMENT.md) for HTTPS, secrets, migrations, initial administrator creation, webhook delivery, backups, and release validation. Production refuses demo accounts, demo analysis, simulated payments, missing email recovery, weak keys, and wildcard host filtering.
+Follow [DEPLOYMENT.md](DEPLOYMENT.md) for HTTPS, secrets, migrations, initial administrator creation, webhook delivery, backups, and release validation. Production refuses demo accounts, demo text extraction, simulated payments, missing email recovery, weak keys, and wildcard host filtering. Confirmation can still use explicitly labelled deterministic urgency rules when assessment providers are unavailable; this is preliminary guidance, not a diagnosis or evidence of a live AI call.
 
 See [API.md](API.md) for the current API conventions and [SECURITY.md](SECURITY.md) for security boundaries and operational requirements.
+
+## Buildathon submission
+
+Start with the [buildathon evidence index](docs/buildathon/README.md) for the overview, PRD, architecture, security/test reports, validation plan and reproducible demo/pitch materials. Source review, local verification, simulated features and unverified providers are labelled separately. The [test report](docs/buildathon/TEST_REPORT.md) records the submitted candidate's actual results and public deployment limitations; landing-page availability alone does not establish backend readiness.

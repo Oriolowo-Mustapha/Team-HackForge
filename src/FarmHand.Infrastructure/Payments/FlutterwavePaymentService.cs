@@ -5,6 +5,8 @@ using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Polly.CircuitBreaker;
+using Polly.Timeout;
 
 namespace FarmHand.Infrastructure.Payments;
 
@@ -129,7 +131,7 @@ public class FlutterwavePaymentService : IPaymentService
 
             return new PaymentResult(true, reference, null, link, amount, currency);
         }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException && !ct.IsCancellationRequested)
+        catch (Exception ex) when (!ct.IsCancellationRequested && ex is HttpRequestException or TaskCanceledException or JsonException or TimeoutRejectedException or BrokenCircuitException)
         {
             _logger.LogError(ex, "Flutterwave initiation error");
             return new PaymentResult(false, null, "The payment provider is unavailable.");
@@ -207,7 +209,7 @@ public class FlutterwavePaymentService : IPaymentService
 
             return new PaymentVerification(outcome, amount, currency, id, txRef, $"Provider status: {status}");
         }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException && !ct.IsCancellationRequested)
+        catch (Exception ex) when (!ct.IsCancellationRequested && ex is HttpRequestException or TaskCanceledException or JsonException or TimeoutRejectedException or BrokenCircuitException)
         {
             _logger.LogError(ex, "Flutterwave verification error");
             return new PaymentVerification(PaymentVerificationOutcome.Error, null, null, null, expectedReference, "The payment provider could not be reached.");
@@ -317,7 +319,7 @@ public class FlutterwavePaymentService : IPaymentService
                 ? new SubaccountResult(false, null, "The payment provider did not return a subaccount id.")
                 : new SubaccountResult(true, subaccountId, null);
         }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException && !ct.IsCancellationRequested)
+        catch (Exception ex) when (!ct.IsCancellationRequested && ex is HttpRequestException or TaskCanceledException or JsonException or TimeoutRejectedException or BrokenCircuitException)
         {
             _logger.LogError(ex, "Flutterwave subaccount error");
             return new SubaccountResult(false, null, "The payment provider is unavailable.", true);

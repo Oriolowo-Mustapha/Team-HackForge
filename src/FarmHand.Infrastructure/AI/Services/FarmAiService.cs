@@ -5,6 +5,8 @@ using FarmHand.Application.Common.Services;
 using FarmHand.Domain.Enums;
 using FarmHand.Infrastructure.AI.Clients;
 using FarmHand.Infrastructure.Services;
+using Polly.CircuitBreaker;
+using Polly.Timeout;
 
 namespace FarmHand.Infrastructure.AI.Services;
 
@@ -49,23 +51,24 @@ public class FarmAiService : IFarmAiService
             {
                 var raw = await call(prompt, ct);
                 var parsed = Parse<AiExtractionDto>(raw);
+                var rules = RuleBasedAnalyzer.Extract(text);
                 var fields = new ExtractedObservation(
                     Math.Clamp(parsed.MortalityCount ?? 0, 0, 10000),
-                    Clip(parsed.WaterConsumption, 100),
-                    Clip(parsed.FeedConsumption, 100),
-                    Clip(parsed.EggProduction, 100),
-                    Clip(parsed.FarmerNotes, 1000) ?? Clip(text, 1000));
+                    Consumption(parsed.WaterConsumption),
+                    Consumption(parsed.FeedConsumption),
+                    Consumption(parsed.EggProduction),
+                    Clip(text, 1000));
 
                 return new ObservationExtraction(
                     fields,
-                    CleanList(parsed.Symptoms, 12),
-                    CleanList(parsed.MissingInformation, 6),
+                    RuleBasedAnalyzer.ApprovedSymptoms(CleanList(parsed.Symptoms, 12)),
+                    rules.MissingInformation,
                     $"{name}:{model}",
                     LanguageCodes.Normalize(parsed.Language));
             }
             catch (Exception ex) when (IsProviderFailure(ex, ct))
             {
-                _logger.LogWarning(ex, "AI extraction via {Provider} failed", name);
+                _logger.LogWarning("AI extraction via {Provider} failed ({Failure})", name, ex.GetType().Name);
             }
         }
 
@@ -91,25 +94,24 @@ public class FarmAiService : IFarmAiService
                 var raw = await call(prompt, ct);
                 var parsed = Parse<AiAssessmentDto>(raw);
                 if (!TryParseSeverity(parsed.Severity, out var severity))
-                    throw new AiProviderException($"Unrecognised severity '{parsed.Severity}'.");
+                    throw new AiProviderException("The provider returned an unrecognised urgency value.");
 
-                return new AIAssessment(
+                return AssessmentSafety.Apply(input, new AIAssessment(
                     severity,
-                    Clip(parsed.DiagnosisSummary, 1000) ?? "No summary was provided.",
-                    Clip(parsed.RecommendedAction, 1000) ?? "Consult a veterinarian if signs continue.",
+                    string.Empty,
+                    string.Empty,
                     severity is Severity.High or Severity.Critical,
-                    Clip(raw, 4000),
-                    $"{name}:{model}",
-                    CleanList(parsed.FarmerActions, 5));
+                    null,
+                    $"{name}:{model}"));
             }
             catch (Exception ex) when (IsProviderFailure(ex, ct))
             {
-                _logger.LogWarning(ex, "AI severity assessment via {Provider} failed", name);
+                _logger.LogWarning("AI severity assessment via {Provider} failed ({Failure})", name, ex.GetType().Name);
             }
         }
 
         _logger.LogInformation("Using rule-based triage for severity assessment");
-        return RuleBasedAnalyzer.Assess(input);
+        return AssessmentSafety.Apply(input, RuleBasedAnalyzer.Assess(input));
     }
 
     /// <summary>Case-insensitive severity parsing. Anything unrecognised is rejected rather than defaulting to Low.</summary>
@@ -129,7 +131,8 @@ public class FarmAiService : IFarmAiService
     private static bool IsProviderFailure(Exception ex, CancellationToken ct) =>
         !ct.IsCancellationRequested
         && ex is HttpRequestException or TaskCanceledException or TimeoutException or JsonException
-            or AiProviderException or KeyNotFoundException or InvalidOperationException;
+            or AiProviderException or KeyNotFoundException or InvalidOperationException
+            or TimeoutRejectedException or BrokenCircuitException;
 
     private static T Parse<T>(string raw)
     {
@@ -148,13 +151,12 @@ public class FarmAiService : IFarmAiService
         REPORT>>>
         Return a single JSON object with exactly these fields:
         - "mortalityCount": integer number of animals that died (0 if the farmer says none died or does not mention deaths)
-        - "waterConsumption": short phrase about drinking, or null if not mentioned
-        - "feedConsumption": short phrase about eating or feed, or null if not mentioned
-        - "eggProduction": short phrase about eggs, or null if not mentioned
-        - "farmerNotes": one or two plain-English sentences restating what the farmer observed (translate from Pidgin, Yoruba, Hausa or Igbo if needed)
+        - "waterConsumption": "normal", "reduced", "increased", "stopped", or null if not mentioned
+        - "feedConsumption": "normal", "reduced", "increased", "stopped", or null if not mentioned
+        - "eggProduction": "normal", "reduced", "increased", "stopped", or null if not mentioned
         - "language": the language the farmer wrote the report in, one of "en", "pcm", "yo", "ha" or "ig". If the farmer mixes languages, answer with the non-English language they used. Null if you cannot tell.
         - "symptoms": array of short symptom phrases the farmer actually described (no diagnoses)
-        - "missingInformation": array of up to 4 short questions whose answers would help a veterinarian (e.g. how many animals are affected, when it started)
+        The server preserves the farmer's original words and supplies clarification questions. Do not supply advice or a rewritten report.
         Do not invent facts that are not in the report. Do not name a disease.
         """;
 
@@ -191,11 +193,8 @@ public class FarmAiService : IFarmAiService
             DATA>>>
             Return a single JSON object:
             - "severity": one of "Low", "Medium", "High", "Critical"
-            - "diagnosisSummary": two or three sentences describing what the signs could indicate and why, phrased as possibilities, not a diagnosis
-            - "farmerActions": array of up to 5 short, practical steps the farmer can do at farm level right now without a veterinarian (e.g. separate the sick animals, provide clean water, improve ventilation, boost feeder hygiene). Never mention prescription medicines, injections or lab tests here.
-            - "recommendedAction": what should happen next as a whole: include "call/request a veterinarian" only for High or Critical severity; for Low or Medium severity the farmer actions alone are enough, so this field should say to keep observing and what would make the situation urgent.
+            Return urgency only. The server supplies approved, non-prescriptive care instructions.
             Use "High" or "Critical" when deaths are rising, several animals are affected, or there are signs such as breathing difficulty, twisted necks, sudden deaths or bloody droppings.
-            {{LanguageInstruction(input.ReportLanguage)}}
             """;
     }
 
@@ -206,16 +205,14 @@ public class FarmAiService : IFarmAiService
         return value.Length <= max ? value : value[..max];
     }
 
-    /// <summary>Maps a detected language code to a prompt instruction for language-aware responses.</summary>
-    private static string LanguageInstruction(string? langCode)
+    private static string? Consumption(string? value) => value?.Trim().ToLowerInvariant() switch
     {
-        var langName = LanguageCodes.DisplayName(langCode);
-        if (langName is null) return string.Empty;
-        return $$"""
-            LANGUAGE OF THE REPLY:
-            The farmer reported in {{langName}}. Write the "diagnosisSummary", "farmerActions" (each item) and "recommendedAction" values fully in {{langName}} so the farmer can read them without help. Then append a short English translation in parentheses at the end of each value so the veterinarian can follow along. Keep the {{langName}} version in front.
-            """;
-    }
+        "normal" => "Normal",
+        "reduced" => "Reduced",
+        "increased" => "Increased",
+        "stopped" => "Stopped",
+        _ => null
+    };
 
     private static IReadOnlyList<string> CleanList(string[]? values, int max) =>
         (values ?? [])
@@ -232,17 +229,12 @@ public class FarmAiService : IFarmAiService
         public string? WaterConsumption { get; set; }
         public string? FeedConsumption { get; set; }
         public string? EggProduction { get; set; }
-        public string? FarmerNotes { get; set; }
         public string? Language { get; set; }
         public string[]? Symptoms { get; set; }
-        public string[]? MissingInformation { get; set; }
     }
 
     private sealed class AiAssessmentDto
     {
         public string? Severity { get; set; }
-        public string? DiagnosisSummary { get; set; }
-        public string[]? FarmerActions { get; set; }
-        public string? RecommendedAction { get; set; }
     }
 }
