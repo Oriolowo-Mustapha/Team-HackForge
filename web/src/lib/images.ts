@@ -1,4 +1,4 @@
-/** Editorial photography (CC0, see /images/credits.json) chosen by species for headers and fallbacks. */
+/** Editorial photography chosen by species for headers and fallbacks — credits in /images/credits.json. */
 const bySpecies: Record<string, string[]> = {
   poultry: ["/images/hens-closeup", "/images/hen-free-range", "/images/layer-house", "/images/hen-garden"],
   goat: ["/images/goat-portrait", "/images/goats-pen", "/images/goat-walking", "/images/goat-black"],
@@ -35,18 +35,7 @@ export function mediaUrl(url: string | null | undefined): string | null {
   return url;
 }
 
-const smallWidths: Record<string, number> = {
-  "/images/farmer-goats": 800,
-  "/images/vet-cattle": 800,
-  "/images/poultry-worker": 800,
-  "/images/hens-closeup": 800,
-  "/images/layer-house": 600,
-  "/images/hen-free-range": 600,
-  "/images/hen-garden": 600,
-  "/images/chicks": 600,
-};
-
 /** The smaller rendition of a bundled photo (cards, thumbnails); the large one is `${base}.webp`. */
 export function smallPhoto(base: string): string {
-  return `${base}-${smallWidths[base] ?? 480}.webp`;
+  return `${base}-800.webp`;
 }

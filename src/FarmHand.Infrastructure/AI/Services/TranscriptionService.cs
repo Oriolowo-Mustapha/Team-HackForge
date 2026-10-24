@@ -38,7 +38,7 @@ public class TranscriptionService : ITranscriptionService
                 {
                     _logger.LogInformation("Audio successfully transcribed with Spitch (RequestId: {RequestId}, DetectedLang: {Lang})",
                         result.RequestId, result.DetectedLanguage);
-                    return new TranscriptionResult(result.Text.Trim(), "spitch");
+                    return new TranscriptionResult(result.Text.Trim(), "spitch", result.DetectedLanguage);
                 }
             }
             catch (Exception ex) when (!ct.IsCancellationRequested)

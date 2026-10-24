@@ -10,9 +10,11 @@ import { incidentsApi, observationsApi } from "@/lib/api/endpoints";
 import type { ConfirmResult, ObservationDetail } from "@/lib/api/schemas";
 import { severityMeta } from "@/lib/api/enums";
 import { formatDateTime, formatRelative } from "@/lib/format";
+import { languageName } from "@/lib/language";
 import { mediaUrl } from "@/lib/images";
 import { qk } from "@/lib/queries";
 import { AssessmentCard, severityFromName } from "@/components/domain/assessment-card";
+import { ListenButton } from "@/components/domain/listen-button";
 import { ObservationStatusBadge, SourceBadge } from "@/components/domain/badges";
 import { Badge } from "@/components/ui/badge";
 import { Button, ButtonLink } from "@/components/ui/button";
@@ -104,6 +106,14 @@ function Evidence({ o }: { o: ObservationDetail }) {
         <Card>
           <CardTitle action={<FileAudio className="size-4 text-faint" aria-hidden />}>Voice note transcript</CardTitle>
           <blockquote className="border-l-[3px] border-beige pl-4 text-[15px] italic leading-relaxed text-ink-3">{o.rawTranscript}</blockquote>
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+            {languageName(o.detectedLanguage) && (
+              <span className="rounded-full bg-sand px-3 py-1 text-xs font-semibold text-ink-3">
+                Reported in {languageName(o.detectedLanguage)}
+              </span>
+            )}
+            <ListenButton text={o.rawTranscript} label="Listen" targetLanguage={o.detectedLanguage ?? undefined} className="mt-3" />
+          </div>
         </Card>
       )}
       <Card>
@@ -125,6 +135,12 @@ function Evidence({ o }: { o: ObservationDetail }) {
             <dt className="text-muted">Species</dt>
             <dd className="font-semibold">{o.subjectSpecies ?? "—"}</dd>
           </div>
+          {languageName(o.detectedLanguage) && (
+            <div>
+              <dt className="text-muted">Language</dt>
+              <dd className="font-semibold">{languageName(o.detectedLanguage)}</dd>
+            </div>
+          )}
         </dl>
       </Card>
     </>
@@ -294,6 +310,7 @@ function ConfirmOutcome({ o, result }: { o: ObservationDetail; result: ConfirmRe
         assessment={{
           severity: final,
           summary: result.aiDiagnosisSummary ?? "",
+          farmerActions: result.aiFarmerActions ?? [],
           recommendedAction: result.aiRecommendedAction ?? "",
           requiresVetConsultation: final >= 2,
           source: result.assessmentSource,
@@ -301,6 +318,9 @@ function ConfirmOutcome({ o, result }: { o: ObservationDetail; result: ConfirmRe
           assessedAt: new Date().toISOString(),
         }}
         overriddenFrom={result.severityOverridden ? suggested : null}
+        audioUrl={result.responseAudioUrl}
+        language={result.responseLanguage ?? o.detectedLanguage}
+        autoPlay={Boolean(result.responseAudioUrl && o.inputChannels?.includes("voice"))}
       />
       {result.incidentAutoCreated && result.autoCreatedIncidentId ? (
         <div className="rounded-[28px] bg-ink p-6 text-cream">
@@ -349,6 +369,17 @@ function ConfirmedSummary({ o }: { o: ObservationDetail }) {
             </ul>
           )}
           {o.farmerNotes && <p className="text-[15px] leading-relaxed">{o.farmerNotes}</p>}
+          <ListenButton
+            text={[
+              o.farmerNotes,
+              o.assessment?.summary,
+              ...(o.assessment?.farmerActions?.length ? ["What you can do now: " + o.assessment.farmerActions.join("; ")] : []),
+              o.assessment?.recommendedAction,
+            ].filter(Boolean).join(". ")}
+            label="Listen to summary"
+            targetLanguage={o.detectedLanguage ?? undefined}
+            className="mt-2"
+          />
           <dl className="mt-4 grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
             {[
               ["Deaths", String(o.mortalityCount)],

@@ -440,7 +440,7 @@ Other list endpoints return a plain JSON array.
 | Value | Name | Meaning |
 | --- | --- | --- |
 | `0` | `RemoteReview` | Chat/photo teleconsult; no animal movement. |
-| `1` | `SharedVisit` | Vet travels to the farm; travel is priced into `farmerCost`. |
+| `1` | `SharedVisit` | Vet travels to the farm; the fixed consultation fee covers the visit. |
 | `2` | `CooperativePlan` | Cost shared among cooperative members; contributions tracked as cost shares. |
 | `3` | `ClinicVisit` | Farmer transports the affected animal to the vet. |
 
@@ -1032,7 +1032,7 @@ The owner is always the authenticated caller. An `ownerId` cannot be supplied.
       "incidentId": "8f1c...",
       "requestType": 1,
       "status": 1,
-      "farmerCost": 25000,
+      "farmerCost": 20000,
       "respondedAt": "2026-10-23T10:00:00Z"
     }
   ]
@@ -1907,14 +1907,15 @@ through cost shares; the Flutterwave payment itself is completed by one payer in
 | --- | --- | --- | --- |
 | `incidentId` | uuid | Yes | Must match the route. |
 | `requestType` | integer | Yes | `RequestType` 0–3. |
-| `farmerCost` | decimal | Yes | 0 or greater, in NGN. |
 | `vetPartnerId` | uuid | No | If supplied, the vet must exist and be active. When omitted the request is broadcast to all active vets, and the first vet to respond claims it. |
+
+There is no `farmerCost` field: every consultation is charged the platform's fixed
+consultation fee of **₦20,000** (in NGN). FarmHand's 5% commission is added on top at payment time.
 
 ```json
 {
   "incidentId": "8f1c...",
   "requestType": 1,
-  "farmerCost": 25000,
   "vetPartnerId": "4a2d..."
 }
 ```
@@ -1939,7 +1940,7 @@ through cost shares; the Flutterwave payment itself is completed by one payer in
 
 Marks a request as `Responded`. Requires the `Vet` or `Admin` role.
 
-Before responding, the request must have a `Completed` payment when `farmerCost > 0`.
+Before responding, the request must have a `Completed` payment (the fixed consultation fee always requires payment).
 
 **Body**
 
@@ -2188,7 +2189,7 @@ There is no endpoint to list treatment plans for a vet request.
 
 Payments are intended to be **pay-before-visit**:
 
-1. Farmer creates a vet request with `farmerCost`.
+1. Farmer creates a vet request; the platform applies its fixed ₦20,000 consultation fee.
 2. Farmer initiates payment.
 3. Farmer completes checkout with Flutterwave (or the simulated flow).
 4. Payment is recorded directly or by webhook.
@@ -2198,12 +2199,12 @@ Payments are intended to be **pay-before-visit**:
 
 | Field | Meaning |
 | --- | --- |
-| `farmerCost` | The vet's charge. |
-| `platformCommission` | 5% of `farmerCost`. |
-| `totalAmount` | `farmerCost + platformCommission` (105% of the vet charge). |
+| `farmerCost` | The fixed consultation fee (₦20,000). |
+| `platformCommission` | 5% of `farmerCost` (₦1,000). |
+| `totalAmount` | `farmerCost + platformCommission` (₦21,000). |
 | `vetPayoutAmount` | The full vet charge. |
 
-Example: `farmerCost = 25,000 NGN` → commission `1,250`, total `26,250`, vet payout `25,000`.
+Example: fixed `farmerCost = 20,000 NGN` → commission `1,000`, total `21,000`, vet payout `20,000`.
 
 ### `POST /api/payments/initiate`
 
@@ -2224,7 +2225,7 @@ Example: `farmerCost = 25,000 NGN` → commission `1,250`, total `26,250`, vet p
 ```json
 {
   "vetRequestId": "3b7a...",
-  "amount": 25000,
+  "amount": 20000,
   "currency": "NGN"
 }
 ```
@@ -2600,7 +2601,7 @@ This endpoint does not check the database or external providers.
 
 1. Farmer creates an incident.
 2. Farmer calls `POST /api/vet-coordination/incidents/{incidentId}/vet-request`.
-3. Farmer calls `POST /api/payments/initiate` with the request's `farmerCost`.
+3. Farmer calls `POST /api/payments/initiate` with the request's `farmerCost` (fixed ₦20,000).
 4. Farmer completes checkout (`checkoutUrl`) or, in simulated mode, uses the returned reference.
 5. Client calls `POST /api/payments/record` with the **total amount**.
 6. Flutterwave may also call `POST /api/payments/webhook`.

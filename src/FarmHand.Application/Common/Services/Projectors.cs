@@ -59,6 +59,7 @@ public class ObservationProjector
             o.FarmerNotes, o.RawTranscript, o.ImageUrl, Mappers.ReadVision(o.VisionAnalysis),
             o.ConfirmationStatus, o.ExtractedByAi, Mappers.IsAiSource(o.ExtractedByAi),
             extraction.Symptoms, extraction.MissingInformation, o.InputChannels,
+            o.DetectedLanguage,
             diagnosis?.ToDto(), incidentId, reused);
     }
 }

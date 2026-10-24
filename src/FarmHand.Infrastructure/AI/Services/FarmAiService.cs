@@ -60,7 +60,8 @@ public class FarmAiService : IFarmAiService
                     fields,
                     CleanList(parsed.Symptoms, 12),
                     CleanList(parsed.MissingInformation, 6),
-                    $"{name}:{model}");
+                    $"{name}:{model}",
+                    LanguageCodes.Normalize(parsed.Language));
             }
             catch (Exception ex) when (IsProviderFailure(ex, ct))
             {
@@ -98,7 +99,8 @@ public class FarmAiService : IFarmAiService
                     Clip(parsed.RecommendedAction, 1000) ?? "Consult a veterinarian if signs continue.",
                     severity is Severity.High or Severity.Critical,
                     Clip(raw, 4000),
-                    $"{name}:{model}");
+                    $"{name}:{model}",
+                    CleanList(parsed.FarmerActions, 5));
             }
             catch (Exception ex) when (IsProviderFailure(ex, ct))
             {
@@ -150,6 +152,7 @@ public class FarmAiService : IFarmAiService
         - "feedConsumption": short phrase about eating or feed, or null if not mentioned
         - "eggProduction": short phrase about eggs, or null if not mentioned
         - "farmerNotes": one or two plain-English sentences restating what the farmer observed (translate from Pidgin, Yoruba, Hausa or Igbo if needed)
+        - "language": the language the farmer wrote the report in, one of "en", "pcm", "yo", "ha" or "ig". If the farmer mixes languages, answer with the non-English language they used. Null if you cannot tell.
         - "symptoms": array of short symptom phrases the farmer actually described (no diagnoses)
         - "missingInformation": array of up to 4 short questions whose answers would help a veterinarian (e.g. how many animals are affected, when it started)
         Do not invent facts that are not in the report. Do not name a disease.
@@ -189,8 +192,10 @@ public class FarmAiService : IFarmAiService
             Return a single JSON object:
             - "severity": one of "Low", "Medium", "High", "Critical"
             - "diagnosisSummary": two or three sentences describing what the signs could indicate and why, phrased as possibilities, not a diagnosis
-            - "recommendedAction": concrete next steps for the farmer today (isolation, biosecurity, records, when to call a vet)
+            - "farmerActions": array of up to 5 short, practical steps the farmer can do at farm level right now without a veterinarian (e.g. separate the sick animals, provide clean water, improve ventilation, boost feeder hygiene). Never mention prescription medicines, injections or lab tests here.
+            - "recommendedAction": what should happen next as a whole: include "call/request a veterinarian" only for High or Critical severity; for Low or Medium severity the farmer actions alone are enough, so this field should say to keep observing and what would make the situation urgent.
             Use "High" or "Critical" when deaths are rising, several animals are affected, or there are signs such as breathing difficulty, twisted necks, sudden deaths or bloody droppings.
+            {{LanguageInstruction(input.ReportLanguage)}}
             """;
     }
 
@@ -199,6 +204,17 @@ public class FarmAiService : IFarmAiService
         if (string.IsNullOrWhiteSpace(value)) return null;
         value = value.Trim();
         return value.Length <= max ? value : value[..max];
+    }
+
+    /// <summary>Maps a detected language code to a prompt instruction for language-aware responses.</summary>
+    private static string LanguageInstruction(string? langCode)
+    {
+        var langName = LanguageCodes.DisplayName(langCode);
+        if (langName is null) return string.Empty;
+        return $$"""
+            LANGUAGE OF THE REPLY:
+            The farmer reported in {{langName}}. Write the "diagnosisSummary", "farmerActions" (each item) and "recommendedAction" values fully in {{langName}} so the farmer can read them without help. Then append a short English translation in parentheses at the end of each value so the veterinarian can follow along. Keep the {{langName}} version in front.
+            """;
     }
 
     private static IReadOnlyList<string> CleanList(string[]? values, int max) =>
@@ -217,6 +233,7 @@ public class FarmAiService : IFarmAiService
         public string? FeedConsumption { get; set; }
         public string? EggProduction { get; set; }
         public string? FarmerNotes { get; set; }
+        public string? Language { get; set; }
         public string[]? Symptoms { get; set; }
         public string[]? MissingInformation { get; set; }
     }
@@ -225,6 +242,7 @@ public class FarmAiService : IFarmAiService
     {
         public string? Severity { get; set; }
         public string? DiagnosisSummary { get; set; }
+        public string[]? FarmerActions { get; set; }
         public string? RecommendedAction { get; set; }
     }
 }

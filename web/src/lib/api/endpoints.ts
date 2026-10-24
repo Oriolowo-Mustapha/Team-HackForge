@@ -37,6 +37,16 @@ export const systemApi = {
   info: () => api("system/info", { schema: s.systemInfoSchema, quiet401: true }),
 };
 
+export type TtsResponse = { audioUrl: string; provider: string; voice: string; creditsCharged: number };
+
+export const voiceApi = {
+  /** Synthesize text to speech via Spitch (with YarnGPT fallback). Returns a data-URI or URL of the audio. */
+  speak: (text: string, options: { voice?: string; targetLanguage?: string } = {}) =>
+    api<TtsResponse>("/api/voice/respond", { body: { text, voice: options.voice ?? null, targetLanguage: options.targetLanguage ?? null } }),
+  /** List available TTS voices. */
+  voices: () => api<{ id: string; name: string; language: string; gender: string; accent: string }[]>("/api/voice/voices"),
+};
+
 export type FarmLocationInput = {
   displayName: string;
   location: string;
@@ -204,7 +214,6 @@ export const vetsApi = {
   createRequest: (body: {
     incidentId: string;
     requestType: number;
-    farmerCost: number;
     vetPartnerId: string | null;
     description: string | null;
     preferredVisitDate: string | null;

@@ -1,6 +1,6 @@
 namespace FarmHand.Application.Common.Interfaces;
 
-public record TranscriptionResult(string Transcript, string Source);
+public record TranscriptionResult(string Transcript, string Source, string? DetectedLanguage = null);
 
 /// <summary>Speech-to-text for voice reports (YarnGPT for Nigerian languages, with a Gemini fallback).</summary>
 public interface ITranscriptionService

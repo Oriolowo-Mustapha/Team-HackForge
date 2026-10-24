@@ -168,7 +168,7 @@ function DashboardBody({ data, drafts }: { data: Dashboard; drafts: ReportDraft[
               className="py-8"
               image={
                 <div className="relative mb-4 h-24 w-40 overflow-hidden rounded-[20px]">
-                  <Image src="/images/hen-free-range-600.webp" alt="" fill sizes="160px" className="object-cover" />
+                  <Image src="/images/hen-free-range-800.webp" alt="" fill sizes="160px" className="object-cover" />
                 </div>
               }
             >

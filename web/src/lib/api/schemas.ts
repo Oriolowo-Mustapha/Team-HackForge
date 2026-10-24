@@ -129,6 +129,7 @@ export type ObservationSummary = z.infer<typeof observationSummarySchema>;
 export const assessmentSchema = z.object({
   severity: z.number(),
   summary: z.string(),
+  farmerActions: z.array(z.string()),
   recommendedAction: z.string(),
   requiresVetConsultation: z.boolean(),
   source: nullableString,
@@ -167,6 +168,7 @@ export const observationDetailSchema = z.object({
   symptoms: z.array(z.string()),
   missingInformation: z.array(z.string()),
   inputChannels: nullableString,
+  detectedLanguage: nullableString,
   assessment: assessmentSchema.nullable(),
   incidentId: id.nullable(),
   reused: z.boolean(),
@@ -186,6 +188,9 @@ export const confirmResultSchema = z.object({
   autoCreatedIncidentId: id.nullable(),
   assessmentSource: nullableString,
   assessmentIsAi: z.boolean(),
+  aiFarmerActions: z.array(z.string()).nullish(),
+  responseAudioUrl: nullableString,
+  responseLanguage: nullableString,
 });
 export type ConfirmResult = z.infer<typeof confirmResultSchema>;
 

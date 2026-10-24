@@ -12,6 +12,9 @@ namespace FarmHand.Application.Features.Payments;
 /// <summary>Platform commission charged on top of the vet's fee.</summary>
 public static class PaymentPolicy
 {
+    /// <summary>The single flat consultation fee every consultation costs, in NGN. FarmHand's 5% commission is added on top at payment time.</summary>
+    public const decimal FixedConsultationFee = 20_000m;
+
     public const decimal PlatformCommissionPercentage = 5m;
 
     public static decimal Commission(decimal amount) =>

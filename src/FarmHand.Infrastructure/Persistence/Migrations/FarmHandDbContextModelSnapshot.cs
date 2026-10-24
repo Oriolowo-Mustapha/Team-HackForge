@@ -36,6 +36,10 @@ namespace FarmHand.Persistence.Migrations
                         .HasMaxLength(1000)
                         .HasColumnType("character varying(1000)");
 
+                    b.Property<string>("FarmerActionsJson")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
                     b.Property<bool>("IncidentCreated")
                         .HasColumnType("boolean");
 
@@ -636,6 +640,10 @@ namespace FarmHand.Persistence.Migrations
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("DetectedLanguage")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
 
                     b.Property<string>("EggProduction")
                         .HasMaxLength(100)
