@@ -19,10 +19,10 @@ export async function POST(request: Request) {
 
   try {
     if (everywhere && access) {
-      await fetch(`${apiBaseUrl()}/api/auth/revoke`, { method: "POST", headers: { ...headers, authorization: `Bearer ${access}` }, cache: "no-store" });
+      await fetch(`${apiBaseUrl()}/api/auth/revoke`, { method: "POST", headers: { ...headers, authorization: `Bearer ${access}` }, cache: "no-store", signal: AbortSignal.timeout(15_000) });
     }
     if (refresh) {
-      await fetch(`${apiBaseUrl()}/api/auth/logout`, { method: "POST", headers, body: JSON.stringify({ refreshToken: refresh }), cache: "no-store" });
+      await fetch(`${apiBaseUrl()}/api/auth/logout`, { method: "POST", headers, body: JSON.stringify({ refreshToken: refresh }), cache: "no-store", signal: AbortSignal.timeout(15_000) });
     }
   } catch {
     // Signing out locally must still succeed when the API is unreachable.

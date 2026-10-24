@@ -6,6 +6,12 @@ namespace FarmHand.Application.Common.DTOs;
 /// <param name="DisplayName">Human-readable farm name.</param>
 /// <param name="Location">Free-text location.</param>
 /// <param name="CreatedAt">UTC creation timestamp.</param>
+/// <param name="Latitude">Optional GPS latitude.</param>
+/// <param name="Longitude">Optional GPS longitude.</param>
+/// <param name="CityOrTown">Optional town or city.</param>
+/// <param name="State">Optional state.</param>
+/// <param name="Country">Country name.</param>
+/// <param name="LocationSource">GPS or manual entry.</param>
 public record FarmDto(
     Guid Id,
     string OwnerId,

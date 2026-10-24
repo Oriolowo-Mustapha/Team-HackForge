@@ -17,7 +17,7 @@ public class DesignTimeDbContextFactory : IDesignTimeDbContextFactory<FarmHandDb
             .Build();
 
         var connectionString = configuration.GetConnectionString("DefaultConnection")
-            ?? "Host=localhost;Port=5432;Database=FarmHandDb;Username=postgres;Password=postgres";
+            ?? throw new InvalidOperationException("Set ConnectionStrings__DefaultConnection explicitly before running database tooling.");
 
         var optionsBuilder = new DbContextOptionsBuilder<FarmHandDbContext>();
         optionsBuilder.UseNpgsql(connectionString);

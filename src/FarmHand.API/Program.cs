@@ -29,6 +29,20 @@ using System.Security.Claims;
 using System.Text;
 using System.Threading.RateLimiting;
 
+if (args.Contains("--check-health", StringComparer.OrdinalIgnoreCase))
+{
+    using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+    try
+    {
+        var port = Environment.GetEnvironmentVariable("ASPNETCORE_HTTP_PORTS")?.Split(';')[0] ?? "8080";
+        var response = await client.GetAsync($"http://127.0.0.1:{port}/health/ready");
+        Environment.ExitCode = response.IsSuccessStatusCode ? 0 : 1;
+    }
+    catch (HttpRequestException) { Environment.ExitCode = 1; }
+    catch (OperationCanceledException) { Environment.ExitCode = 1; }
+    return;
+}
+
 var builder = WebApplication.CreateBuilder(args);
 
 const long MaxRequestBytes = 25 * 1024 * 1024;
@@ -90,6 +104,7 @@ builder.Services.AddScoped<PaymentSettlement>();
 if (builder.Environment.IsDevelopment() && builder.Configuration["Demo:Enabled"] is null)
     builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?> { ["Demo:Enabled"] = "true" });
 var demoEnabled = builder.Configuration.GetValue("Demo:Enabled", false);
+ConfigurationValidator.Validate(builder.Configuration, builder.Environment.IsProduction());
 
 // Infrastructure
 builder.Services.AddInfrastructure(builder.Configuration, builder.Environment.IsDevelopment());
@@ -115,7 +130,7 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
     {
         var parts = network.Split('/');
         if (parts.Length == 2 && IPAddress.TryParse(parts[0], out var prefix) && int.TryParse(parts[1], out var length))
-            options.KnownNetworks.Add(new Microsoft.AspNetCore.HttpOverrides.IPNetwork(prefix, length));
+            options.KnownIPNetworks.Add(new System.Net.IPNetwork(prefix, length));
     }
 });
 
@@ -209,6 +224,11 @@ builder.Services.AddRateLimiter(options =>
         ClientKey(context),
         _ => new FixedWindowRateLimiterOptions { PermitLimit = 20, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
 
+    // Profile reads are ordinary authenticated traffic; they must not consume the sign-in budget.
+    options.AddPolicy("sessions", context => RateLimitPartition.GetFixedWindowLimiter(
+        ClientKey(context),
+        _ => new FixedWindowRateLimiterOptions { PermitLimit = 120, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
+
     // AI, speech and upload endpoints cost money per call: limit per signed-in user.
     options.AddPolicy("ai", context => RateLimitPartition.GetSlidingWindowLimiter(
         UserKey(context),
@@ -225,10 +245,13 @@ builder.Services.AddRateLimiter(options =>
 
 var app = builder.Build();
 
+var migrateOnly = args.Contains("--migrate", StringComparer.OrdinalIgnoreCase);
+var bootstrapOnly = args.Contains("--bootstrap-admin", StringComparer.OrdinalIgnoreCase);
+
 // Migrate/seed only when explicitly enabled for this environment.
 var migrateOnStartup = app.Environment.IsDevelopment()
     || demoEnabled
-    || app.Configuration.GetValue<bool>("Database:MigrateOnStartup");
+    || app.Configuration.GetValue<bool>("Database:MigrateOnStartup") || migrateOnly;
 
 if (migrateOnStartup)
 {
@@ -244,6 +267,26 @@ if (migrateOnStartup)
         await seeder.SeedAsync();
     }
 }
+
+if (bootstrapOnly)
+{
+    using var scope = app.Services.CreateScope();
+    var db = scope.ServiceProvider.GetRequiredService<FarmHandDbContext>();
+    if (await db.Users.AnyAsync(u => u.Role == FarmHand.Domain.Entities.UserRoles.Admin))
+        throw new InvalidOperationException("An administrator already exists. Use the account recovery workflow.");
+    var email = app.Configuration["AdminBootstrap:Email"]?.Trim().ToLowerInvariant();
+    var password = app.Configuration["AdminBootstrap:Password"];
+    if (string.IsNullOrWhiteSpace(email) || !new System.ComponentModel.DataAnnotations.EmailAddressAttribute().IsValid(email)
+        || string.IsNullOrWhiteSpace(password) || FarmHand.API.Controllers.AuthController.ValidatePassword(password) is not null)
+        throw new InvalidOperationException("Set a valid AdminBootstrap:Email and strong AdminBootstrap:Password for the one-time administrator creation.");
+    var admin = new FarmHand.Domain.Entities.User(email, BCrypt.Net.BCrypt.HashPassword(password), FarmHand.Domain.Entities.UserRoles.Admin, "Administrator", null);
+    admin.SetTemporaryPassword(admin.PasswordHash);
+    db.Users.Add(admin);
+    await db.SaveChangesAsync();
+    app.Logger.LogInformation("Initial administrator created. A password change is required at first sign-in.");
+    return;
+}
+if (migrateOnly) return;
 
 app.UseForwardedHeaders();
 
@@ -400,9 +443,15 @@ app.MapControllers();
 
 app.MapGet("/health", () => Results.Ok(new { status = "healthy", timestamp = DateTime.UtcNow })).DisableRateLimiting();
 app.MapGet("/health/ready", async (FarmHandDbContext db, CancellationToken ct) =>
-    await db.CanConnectAsync(ct)
-        ? Results.Ok(new { status = "ready", database = "connected" })
-        : Results.Json(new { status = "unavailable", database = "unreachable" }, statusCode: StatusCodes.Status503ServiceUnavailable))
+{
+    try
+    {
+        if (await db.CanConnectAsync(ct) && !(await db.Database.GetPendingMigrationsAsync(ct)).Any())
+            return Results.Json(new { status = "ready" });
+    }
+    catch (Exception ex) when (ex is not OperationCanceledException) { }
+    return Results.Json(new { status = "unavailable" }, statusCode: StatusCodes.Status503ServiceUnavailable);
+})
     .DisableRateLimiting();
 
 app.Run();

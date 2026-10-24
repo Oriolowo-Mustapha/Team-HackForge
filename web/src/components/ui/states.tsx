@@ -43,6 +43,9 @@ export function ErrorState({ error, onRetry, className, compact }: { error: unkn
     icon = <WifiOff />;
     title = "You're offline";
     body = "We couldn't reach FarmHand. Check your connection — anything you were writing is still here.";
+  } else if (apiError?.code === "api_unreachable") {
+    title = "FarmHand is temporarily unavailable";
+    body = "The service could not be reached. Please try again shortly.";
   } else if (apiError?.status === 403) {
     icon = <Lock />;
     title = "You don't have access";

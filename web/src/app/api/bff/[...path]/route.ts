@@ -12,6 +12,7 @@ import {
   type TokenPair,
 } from "@/lib/server/session";
 import { cookies } from "next/headers";
+import { BodyTooLargeError, readBoundedBody } from "@/lib/server/request-body";
 
 export const dynamic = "force-dynamic";
 
@@ -31,8 +32,13 @@ async function handle(request: Request, ctx: { params: Promise<{ path: string[] 
   const declared = Number(request.headers.get("content-length") ?? "0");
   if (declared > MAX_BODY_BYTES) return problem(413, "The upload is too large.");
 
-  const body = request.method === "GET" || request.method === "HEAD" ? undefined : await request.arrayBuffer();
-  if (body && body.byteLength > MAX_BODY_BYTES) return problem(413, "The upload is too large.");
+  let body: ArrayBuffer | undefined;
+  try {
+    body = request.method === "GET" || request.method === "HEAD" ? undefined : await readBoundedBody(request, MAX_BODY_BYTES);
+  } catch (error) {
+    if (error instanceof BodyTooLargeError) return problem(413, "The upload is too large.");
+    return problem(400, "The request body could not be read.");
+  }
 
   const search = new URL(request.url).search;
   const target = `${apiBaseUrl()}/api/${joined}${search}`;
@@ -44,10 +50,15 @@ async function handle(request: Request, ctx: { params: Promise<{ path: string[] 
       if (value) headers[name] = value;
     }
     if (token) headers.authorization = `Bearer ${token}`;
-    return fetch(target, { method: request.method, headers, body, cache: "no-store", redirect: "manual" });
+    return fetch(target, { method: request.method, headers, body, cache: "no-store", redirect: "manual", signal: AbortSignal.timeout(90_000) });
   };
 
-  const session = await resolveAccessToken(request);
+  let session: Awaited<ReturnType<typeof resolveAccessToken>>;
+  try {
+    session = await resolveAccessToken(request);
+  } catch {
+    return problem(503, "FarmHand is temporarily unavailable. Please try again shortly.", "api_unreachable");
+  }
   let rotated: TokenPair | null = session.rotated;
 
   let upstream: Response;
@@ -64,7 +75,7 @@ async function handle(request: Request, ctx: { params: Promise<{ path: string[] 
       }
     }
   } catch {
-    return problem(503, "The FarmHand service is unreachable. Check your connection and try again.", "api_unreachable");
+    return problem(503, "FarmHand is temporarily unavailable. Please try again shortly.", "api_unreachable");
   }
 
   if (upstream.status === 401) {

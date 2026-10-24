@@ -53,16 +53,18 @@ public class PaymentTests
     }
 
     [Fact]
-    public void MarkCompleted_WithNewReferenceUpdatesReferenceAndTimestamp()
+    public void MarkCompleted_PreservesMerchantReferenceAndFirstProviderId()
     {
         var payment = new Payment(Guid.NewGuid(), new Money(5000), 5m);
-        payment.MarkCompleted("FH_first");
+        payment.MarkPending("FH_merchant");
+        payment.MarkCompleted("provider_first");
         var firstPaidAt = payment.PaidAt;
 
-        payment.MarkCompleted("FH_second");
+        payment.MarkCompleted("provider_second");
 
-        Assert.Equal("FH_second", payment.TransactionReference);
-        Assert.True(payment.PaidAt >= firstPaidAt);
+        Assert.Equal("FH_merchant", payment.TransactionReference);
+        Assert.Equal("provider_first", payment.ProviderTransactionId);
+        Assert.Equal(firstPaidAt, payment.PaidAt);
     }
 
     [Fact]
@@ -73,5 +75,24 @@ public class PaymentTests
         payment.MarkFailed();
 
         Assert.Equal("Failed", payment.Status);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void CompletedPayment_CannotBeFailedOrCancelled(bool fail)
+    {
+        var payment = new Payment(Guid.NewGuid(), new Money(5000), 5m);
+        payment.MarkPending("merchant-reference");
+        payment.MarkCompleted("provider-id");
+        Assert.Throws<InvalidOperationException>(() => { if (fail) payment.MarkFailed(); else payment.Cancel(); });
+    }
+
+    [Fact]
+    public void CancelledPayment_CannotBeCompleted()
+    {
+        var payment = new Payment(Guid.NewGuid(), new Money(5000), 5m);
+        payment.Cancel();
+        Assert.Throws<InvalidOperationException>(() => payment.MarkCompleted());
     }
 }

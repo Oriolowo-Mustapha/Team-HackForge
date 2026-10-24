@@ -1,0 +1,100 @@
+name: Verify FarmHand
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  full-stack:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:18.6
+        env:
+          POSTGRES_DB: farmhand_test
+          POSTGRES_USER: farmhand
+          POSTGRES_PASSWORD: ci-disposable-db-password
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U farmhand -d farmhand_test"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_URLS: http://127.0.0.1:5037
+      ConnectionStrings__DefaultConnection: Host=127.0.0.1;Database=farmhand_test;Username=farmhand;Password=ci-disposable-db-password
+      Https__Disabled: "true"
+      Demo__Enabled: "true"
+      Ai__DemoFallback: "true"
+      Flutterwave__Mode: Simulated
+      SESSION_COOKIE_SECURE: "false"
+      FARMHAND_API_URL: http://127.0.0.1:5037
+      NEXT_TELEMETRY_DISABLED: "1"
+      DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.20.0
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Generate disposable test secrets
+        run: |
+          echo "Jwt__SecretKey=$(openssl rand -hex 48)" >> "$GITHUB_ENV"
+          echo "Security__FieldEncryptionKey=$(openssl rand -base64 32)" >> "$GITHUB_ENV"
+          password="Test-$(openssl rand -hex 16)-123!"
+          echo "Seed__Password=$password" >> "$GITHUB_ENV"
+          echo "E2E_PASSWORD=$password" >> "$GITHUB_ENV"
+      - run: dotnet restore FarmHand.slnx --locked-mode
+      - run: dotnet test FarmHand.slnx -c Release --no-restore --logger trx
+      - run: npm ci
+        working-directory: web
+      - run: npm run lint && npm run typecheck && npm test && npm audit --omit=dev
+        working-directory: web
+      - run: npm run build
+        working-directory: web
+      - run: npx playwright install --with-deps chromium --only-shell
+        working-directory: web
+      - name: Start isolated full stack
+        run: |
+          dotnet src/FarmHand.API/bin/Release/net10.0/FarmHand.API.dll > /tmp/farmhand-api.log 2>&1 &
+          mkdir -p web/.next/standalone/public
+          cp -r web/public/. web/.next/standalone/public/
+          cp -r web/.next/static web/.next/standalone/.next/static
+          HOSTNAME=127.0.0.1 PORT=3000 node web/.next/standalone/server.js > /tmp/farmhand-web.log 2>&1 &
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:3000/api/health; then exit 0; fi
+            sleep 1
+          done
+          cat /tmp/farmhand-api.log /tmp/farmhand-web.log
+          exit 1
+      - run: npm run test:e2e
+        working-directory: web
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: workflow-diagnostics
+          path: |
+            web/playwright-report
+            web/test-results
+            **/TestResults
+            /tmp/farmhand-api.log
+            /tmp/farmhand-web.log
+  containers:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    needs: full-stack
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate and build production containers
+        run: |
+          cp .env.example .env
+          docker compose config --quiet
+          docker compose build

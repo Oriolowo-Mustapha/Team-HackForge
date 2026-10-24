@@ -1,57 +1,27 @@
-## Summary
+## Result
 
-Makes FarmHand work end to end and adds a real web app.
+FarmHand can now run as a complete local stack. Sign-in reaches the real API and database, and farmer, vet, payment, profile, and administrator workflows have working screens.
 
-**Backend (.NET 9)**
-- Payment creation fixed. Flutterwave Standard now uses our own `tx_ref`, server-side `verify_by_reference` and webhook re-verification. A clearly labelled **Simulated** mode (HMAC-signed references, no money moves) is used for demos.
-- AI: Gemini with a Groq fallback replaces the retired models. When no AI provider is configured, a transparent rule-based triage is used, and every result is labelled with its source. An AI outage returns `503 ai_unavailable` instead of a fake success.
-- New workflows:
-  - observations with text, voice or photo, review and confirm;
-  - case files with timeline, actions, follow-ups and prevention notes;
-  - vet request accept, decline, cancel and complete, plus treatment plans with schedules;
-  - payment quote, verify and cancel;
-  - admin overview, users, vets, farms, payments, audit log and system health.
-- Security:
-  - audit log restricted to admins;
-  - atomic vet claim, so two vets can't accept the same request;
-  - token versioning and forced password change;
-  - rate limits;
-  - signature-checked uploads;
-  - encrypted payout fields;
-  - cross-farm access returns 403;
-  - farmer contact details shown only to the vet who accepted.
-- EF Core migration `PlatformCompletion`, plus a deterministic demo seeder that labels its records as demo data.
+## Changes
 
-**Web app (`web/`, Next.js 16, strict TypeScript, Tailwind v4)**
-- Backend-for-frontend: tokens live only in HttpOnly cookies, browser JavaScript never sees them, and mutations require a CSRF header and an origin check.
-- Design system built from the brief's palette, with a dark sidebar on desktop and a dark bottom nav with a raised "Report" button on mobile.
-- Screens:
-  - landing, sign in and registration, password reset;
-  - first-farm setup and the farmer dashboard;
-  - animals and groups;
-  - **health scanner**: camera, upload, voice or text, real upload progress, drafts saved on the device, manual fallback;
-  - report review and confirm;
-  - cases and the case file.
-- PWA manifest and icons; CC0 livestock photography with credits.
+- Complete vet requests, treatment/payout controls, checkout and payment history, profiles/farm editing, and all admin navigation routes.
+- Align frontend/API ports, add bounded request streaming and service timeouts, preserve sessions during transient refresh failures, and distinguish service outages from an offline browser.
+- Fix authentication rate limiting so profile reads do not exhaust the credential budget. Make password-reset consumption concurrency-safe.
+- Move to patched .NET 10 LTS packages and lock NuGet/npm dependencies. Add explicit production configuration validation and one-time administrator bootstrap.
+- Add private-data-safe offline navigation, readiness probes, persistent uploads, HTTPS/reverse-proxy and verified-webhook routing, development/production Compose stacks, container builds, and CI.
+- Replace stale API/deployment guidance with current setup, security, backup, recovery, and release instructions.
 
-## Not finished yet (follow-up commits)
-- Payment, vet and admin screens in the web app; the service worker and offline page caching.
-- Playwright journeys, updated .NET unit and integration tests, and the README, deployment and demo docs.
+## Local verification
 
-## Verification
-- `npm run typecheck` and `npm run lint` pass in `web/`.
-- API smoke test against local Postgres covered:
-  - report → confirm → High-severity case;
-  - cross-farm access → 403;
-  - open requests hide contact details;
-  - atomic accept;
-  - simulated payment, including idempotent initiation;
-  - treatment plan, then the vet completes the request;
-  - invalid transition → 409;
-  - farmer reading audit events → 403.
-- Screens checked in Chromium at 390 px and 1440 px against the seeded demo data.
-- The existing .NET test projects have **not** been updated for the new payment semantics yet, so some tests are expected to fail until the follow-up commit.
+- 42 backend tests passed, including a real PostgreSQL reset-token race regression.
+- 3 request-body limit tests passed.
+- 10 Playwright tests passed against the real .NET API/PostgreSQL stack: all role navigation, registration/farm setup, cross-farm access, CSRF, competing acceptance, amount tampering, payment UI and idempotency, treatment plans, onboarding/deactivation, offline loading, and phone layout.
+- TypeScript, ESLint, and production web build passed. npm production audit reports zero known vulnerabilities.
 
-🤖 Generated with [Claude Code](https://claude.com/claude-code)
+## Deployment requirements
 
-https://claude.ai/code/session_01U15LREww1P8tGbHZvFVnfA
+Production intentionally refuses demo accounts, simulated payments, weak/missing keys, wildcard hosts, and missing recovery-email configuration. Supply the real domain and provider credentials, verify email delivery and provider settlement, and perform a backup/restore drill in the target environment before public launch. The supplied deployment uses one web replica; distributed refresh coordination is needed before horizontal scaling.
+
+## Integration and CI status
+
+Integrated the latest Spitch audio and dual GPS/manual location update from master. Preserved location metadata when editing a farm name, enabled same-origin GPS permissions, bounded reverse-geocoding waits, and sanitized provider error output. Both Compose files and the Caddy configuration validate locally. GitHub Actions could not start because the account is locked by a billing issue; container builds still require CI or a Docker-enabled host.

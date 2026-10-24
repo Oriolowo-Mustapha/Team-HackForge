@@ -1,218 +1,10 @@
-# FarmHand API
+# FarmHand HTTP API
 
-Voice-first livestock and poultry health API for farmers, veterinarians, and administrators.
+The API targets .NET 10 and PostgreSQL. The web app calls it through the same-origin `/api/bff/*` proxy; bearer and refresh tokens stay in HttpOnly cookies.
 
-This document describes the API implemented by this repository. It is intended as the integration contract for the frontend and as an operational reference for deployment.
+## Authoritative contract
 
-Last updated: 2026-10-23
-
----
-
-## Contents
-
-- [Base URLs](#base-urls)
-- [Quick start](#quick-start)
-- [Authentication and authorization](#authentication-and-authorization)
-- [Conventions](#conventions)
-- [Errors](#errors)
-- [Pagination](#pagination)
-- [Enums](#enums)
-- [Endpoint index](#endpoint-index)
-- [Auth](#auth)
-- [Admin](#admin)
-- [Vets](#vets)
-- [Vet account](#vet-account)
-- [Farms](#farms)
-- [Livestock categories](#livestock-categories)
-- [Livestock](#livestock)
-- [Incidents](#incidents)
-- [Incident actions](#incident-actions)
-- [Follow-ups](#follow-ups)
-- [Poultry observations](#poultry-observations)
-- [Chat observations](#chat-observations)
-- [Voice](#voice)
-- [Vet coordination](#vet-coordination)
-- [Treatment plans](#treatment-plans)
-- [Payments](#payments)
-- [Audit events](#audit-events)
-- [Health](#health)
-- [Data models](#data-models)
-- [End-to-end workflows](#end-to-end-workflows)
-- [Configuration](#configuration)
-- [Production checklist](#production-checklist)
-- [Known limitations](#known-limitations)
-
----
-
-## Base URLs
-
-| Environment | URL |
-| --- | --- |
-| Local HTTP | `http://localhost:5037` |
-| Local HTTPS | `https://localhost:7215` |
-| Swagger UI (Development only) | `http://localhost:5037/swagger` |
-| OpenAPI JSON (Development only) | `http://localhost:5037/swagger/v1/swagger.json` |
-
-All API routes are under `/api`, except `/health`.
-
-Requests and responses are JSON unless an endpoint is marked `multipart/form-data`.
-
----
-
-## Quick start
-
-### 1. Register a farmer
-
-```http
-POST /api/auth/register
-Content-Type: application/json
-
-{
-  "email": "farmer@example.com",
-  "password": "StrongPass123!",
-  "fullName": "Ada Okafor",
-  "phoneNumber": "+2348012345678"
-}
-```
-
-Response: `201 Created`
-
-```json
-{
-  "message": "Account created successfully. Please log in to receive your access token."
-}
-```
-
-Registration does **not** return a token.
-
-### 2. Log in
-
-```http
-POST /api/auth/login
-Content-Type: application/json
-
-{
-  "email": "farmer@example.com",
-  "password": "StrongPass123!"
-}
-```
-
-Response: `200 OK`
-
-```json
-{
-  "message": "Login successful.",
-  "userId": "4d6f4b4e-...",
-  "email": "farmer@example.com",
-  "role": "Farmer",
-  "token": "eyJhbGciOiJIUzI1NiIs...",
-  "expiresAt": "2026-10-23T12:00:00Z"
-}
-```
-
-Store `token` and send it on every protected request:
-
-```http
-Authorization: Bearer eyJhbGciOiJIUzI1NiIs...
-```
-
-The access token expires after 60 minutes by default. See [Known limitations](#known-limitations) for the current refresh-token behavior.
-
-### 3. Create a farm
-
-```http
-POST /api/farms
-Authorization: Bearer <token>
-Content-Type: application/json
-
-{
-  "displayName": "Green Valley Farm",
-  "location": "Ibadan, Oyo State"
-}
-```
-
-Response: `201 Created`
-
-```json
-{ "id": "8d4b2f6e-..." }
-```
-
-### 4. Add a livestock category, then animals
-
-```http
-POST /api/livestock/categories
-Authorization: Bearer <token>
-Content-Type: application/json
-
-{
-  "farmId": "8d4b2f6e-...",
-  "name": "Poultry",
-  "description": "Layer hens"
-}
-```
-
-```http
-POST /api/livestock/records
-Authorization: Bearer <token>
-Content-Type: application/json
-
-{
-  "farmId": "8d4b2f6e-...",
-  "categoryId": "1c3a2b44-...",
-  "species": 3,
-  "animalName": 7,
-  "sex": "Female",
-  "approximateAge": 8,
-  "diseaseHistory": null,
-  "recentGestationDate": null,
-  "lastVeterinaryVisit": null,
-  "vaccinations": "Newcastle, week 4",
-  "lastLactationDate": null,
-  "parentage": null
-}
-```
-
-### 5. Record an observation
-
-Text observation:
-
-```http
-POST /api/poultry/observations
-Authorization: Bearer <token>
-Content-Type: application/json
-
-{
-  "farmId": "8d4b2f6e-...",
-  "livestockCategoryId": "1c3a2b44-...",
-  "rawText": "Three hens died since yesterday and the rest look weak",
-  "idempotencyKey": "checkin-2026-10-23-001"
-}
-```
-
-Response: `202 Accepted`
-
-```json
-{ "id": "f5d8a8cb-..." }
-```
-
-Then confirm the observation:
-
-```http
-POST /api/poultry/observations/f5d8a8cb-.../confirm
-Authorization: Bearer <token>
-Content-Type: application/json
-
-{
-  "observationId": "f5d8a8cb-...",
-  "correctedNotes": "Three hens died since yesterday; the rest are weak",
-  "overrideSeverity": null,
-  "overrideReason": null
-}
-```
-
-If the final severity is `High` (2) or `Critical` (3), an incident is created automatically.
-
----
+In Development, inspect `/swagger` and `/swagger/v1/swagger.json` on the API (normally `http://localhost:5037`). Controller DTOs and the generated OpenAPI document are authoritative. Web response schemas are in `web/src/lib/api/schemas.ts` and are validated at runtime.
 
 ## Authentication and authorization
 
@@ -726,244 +518,24 @@ All routes require the `Admin` role.
 
 ### `POST /api/admin/vets`
 
-Creates a `User` with role `Vet` and a linked `VetPartner` profile, then emails login credentials when email delivery is enabled.
+Every protected API verifies role and resource access. Farmers access their own farms; vets access accepted work; administrators have platform oversight. An identifier alone does not grant access. State-changing web requests need `x-farmhand-csrf: 1` and a trusted Origin. Credential endpoints have a separate rate budget from authenticated profile reads.
 
-**Body**
+## Main workflows
 
-| Field | Type | Required | Rules |
-| --- | --- | --- | --- |
-| `email` | string | Yes | Valid email, max 255. |
-| `temporaryPassword` | string | No | If supplied: 8+ characters, max 72 UTF-8 bytes. If omitted, a 14-character password is generated. |
-| `fullName` | string | No | Max 200. Used as the vet partner name; defaults to the email. |
-| `specialization` | string | Yes | Max 100. |
-| `contact` | string | Yes | Max 200. |
-| `phoneNumber` | string | No | Max 20. |
-
-```json
-{
-  "email": "vet@example.com",
-  "temporaryPassword": null,
-  "fullName": "Dr. Musa Bello",
-  "specialization": "Poultry medicine",
-  "contact": "+2348098765432"
-}
-```
-
-**Response: `201 Created`**
-
-```json
-{
-  "vetId": "4a2d...",
-  "userId": "98c1...",
-  "email": "vet@example.com",
-  "role": "Vet",
-  "specialization": "Poultry medicine",
-  "credentialsEmailed": true,
-  "message": "Vet doctor registered. Login credentials were emailed."
-}
-```
-
-The temporary password is never returned by the API.
-
-**Errors**
-
-| Status | Reason |
+| Area | Routes |
 | --- | --- |
-| `400` | Validation failed, email already registered, or email delivery disabled while no temporary password was supplied. |
-
-If email delivery fails after the account is created, the response still returns `201` with `credentialsEmailed: false`. An admin must then use the reset-credentials endpoint.
-
----
-
-### `POST /api/admin/vets/{vetId}/reset-credentials`
-
-Generates a new temporary password, emails it, revokes refresh tokens, and increments the vet user's token version.
-
-**Body:** none.
-
-**Response: `200 OK`**
-
-```json
-{
-  "credentialsEmailed": true,
-  "message": "A new temporary password was emailed to the vet."
-}
-```
-
-**Errors**
-
-| Status | Reason |
-| --- | --- |
-| `400` | Email delivery is disabled. |
-| `404` | Vet or linked user not found. |
-
-If the email fails, the password has still been changed and `credentialsEmailed` is `false`.
-
----
-
-### `GET /api/admin/vets`
-
-**Query**
-
-| Parameter | Default | Behavior |
-| --- | --- | --- |
-| `page` | `1` | Clamped to at least 1. |
-| `pageSize` | `20` | Clamped to 1–100. |
-
-**Response: `200 OK`**
-
-```json
-{
-  "items": [
-    {
-      "id": "4a2d...",
-      "userId": "98c1...",
-      "name": "Dr. Musa Bello",
-      "email": "vet@example.com",
-      "specialization": "Poultry medicine",
-      "contact": "+2348098765432",
-      "isActive": true,
-      "hasPayoutAccount": true,
-      "createdAt": "2026-10-20T08:00:00Z"
-    }
-  ],
-  "page": 1,
-  "pageSize": 20,
-  "totalCount": 1,
-  "totalPages": 1
-}
-```
-
----
-
-### `DELETE /api/admin/vets/{vetId}`
-
-Deactivates the vet profile and its linked user.
-
-**Response: `200 OK`**
-
-```json
-{ "message": "Vet deactivated." }
-```
-
-**Errors**
-
-| Status | Reason |
-| --- | --- |
-| `404` | Vet not found. |
-
----
-
-## Vets
-
-### `GET /api/vets`
-
-Any authenticated user. Returns active vets that can be assigned to a request.
-
-**Response: `200 OK`**
-
-```json
-[
-  {
-    "id": "4a2d...",
-    "name": "Dr. Musa Bello",
-    "specialization": "Poultry medicine",
-    "contact": "+2348098765432",
-    "hasPayoutAccount": true
-  }
-]
-```
-
-The list is ordered by name and excludes inactive vets.
-
----
-
-## Vet account
-
-Requires the `Vet` role. The current user must have an active linked `VetPartner`.
-
-### `GET /api/vet/me/payout-account`
-
-**Response: `200 OK`**
-
-```json
-{
-  "configured": true,
-  "bankCode": "058",
-  "accountName": "Dr. Musa Bello",
-  "accountNumberMasked": "********6789",
-  "country": "NG",
-  "subaccountConfigured": true
-}
-```
-
-Fields are `null` when not configured. The account number is always masked.
-
-**Errors**
-
-| Status | Reason |
-| --- | --- |
-| `403` | No authenticated vet account, or vet is inactive. |
-| `404` | No vet profile is linked to this account. |
-
----
-
-### `PUT /api/vet/me/payout-account`
-
-Registers or updates a payout account with the payment provider as a subaccount.
-
-**Body**
-
-| Field | Type | Required | Rules |
-| --- | --- | --- | --- |
-| `bankCode` | string | Yes | 2–20 characters. |
-| `accountNumber` | string | Yes | 6–34 characters. |
-| `accountName` | string | Yes | 3–150 characters. |
-| `country` | string | No | Max 10; defaults to `NG`, uppercased. |
-
-```json
-{
-  "bankCode": "058",
-  "accountNumber": "0123456789",
-  "accountName": "Dr. Musa Bello",
-  "country": "NG"
-}
-```
-
-**Response: `200 OK`**
-
-```json
-{
-  "message": "Payout account saved.",
-  "payoutAccount": {
-    "configured": true,
-    "bankCode": "058",
-    "accountName": "Dr. Musa Bello",
-    "accountNumberMasked": "********6789",
-    "country": "NG",
-    "subaccountConfigured": true
-  }
-}
-```
-
-In simulated payment mode, a stable fake subaccount ID is generated and saved without calling Flutterwave.
-
-**Errors**
-
-| Status | Reason |
-| --- | --- |
-| `400` | Invalid account details or provider rejected the account. |
-| `403` | No authenticated active vet account. |
-| `404` | No linked vet profile. |
-| `502` | Payment provider temporarily unavailable. |
-
----
-
-## Farms
-
-### `POST /api/farms`
-
-The owner is always the authenticated caller. An `ownerId` cannot be supplied.
+| Farms | `GET/POST /api/farms`, `GET/PUT /api/farms/{id}`, `GET /api/farms/{id}/overview` |
+| Livestock | `/api/livestock/categories`, `/api/livestock/categories/details`, `/api/livestock/animals`, animal details, photo, archive and restore |
+| Reports | `POST/GET /api/observations`, `GET/DELETE /api/observations/{id}`, `POST /api/observations/{id}/confirm` |
+| Case files | `GET /api/incidents`, `GET /api/incidents/{id}/case`, case status, actions, follow-ups and prevention plans |
+| Vet directory | `GET /api/VetCoordination/vets` |
+| Vet requests | `GET /api/VetCoordination/vet-requests`, `GET /api/VetCoordination/vet-requests/{id}`, create from an incident, respond, decline, cancel and complete |
+| Treatment | `/api/treatment-plans`, `/api/treatment-plans/{id}/steps/{stepId}/complete` |
+| Payout account | `GET/PUT /api/vet/me/payout-account` |
+| Payments | `/api/payments`, `/api/payments/quote`, `/initiate`, `/verify`, reference lookup and cancellation |
+| Admin | `/api/admin/overview`, `/users`, `/vets`, `/farms`, `/incidents`, `/payments`, `/system` |
+| Audit | `/api/audit-events` (Admin only) |
+| Status | `/api/system/info`, `/health`, `/health/ready` |
 
 **Body**
 
@@ -2662,53 +2234,30 @@ When `ASPNETCORE_ENVIRONMENT=Development`, startup migrates the database and see
 | Farmer | `farmer@farmhand.ai` |
 | Vet | `vet@farmhand.ai` |
 
-Do not use the demo password in production.
+### Reporting and veterinary care
 
-### Email delivery
+1. Submit an observation using text, audio, image, or explicit manual entry. Multipart uploads are bounded and file signatures are checked.
+2. Review the extracted fields and labelled assessment source. AI suggestions are not a diagnosis.
+3. Confirm the report. High/critical observations can create an incident automatically.
+4. Create a vet request from the case file. Open requests hide farmer contact details.
+5. A vet accepts atomically; competing acceptance attempts cannot assign two vets. Accepted vets receive relevant farmer contact details.
+6. If there is a fee, the farmer pays after acceptance. A vet shares a treatment plan and completes the consultation after verified payment, or immediately when there is no fee.
+7. The farmer records follow-ups and completes treatment steps in the case timeline.
 
-Brevo is used for vet credential emails:
+### Payments
 
-- If `Brevo:Enabled` is `false`, admin vet registration requires a `temporaryPassword` and reset-credentials returns `400`.
-- If delivery fails after account creation, the account exists but the password may be unknown; use reset-credentials once email works.
-- Emails are HTML with a plain-text alternative.
-- Sender address must be verified by Brevo.
+`GET /api/payments/quote?vetRequestId=...` returns the authoritative fee, fixed platform commission, currency, mode and payability. `POST /api/payments/initiate` takes the request ID, fee and currency; an `Idempotency-Key` header makes retries safe. Amount/currency tampering is rejected. Live checkout returns an HTTPS provider URL.
 
----
+A checkout redirect does not prove payment. `POST /api/payments/verify` asks the server to verify the merchant reference with the provider. The webhook at `/api/payments/webhook` checks signatures and independently re-verifies provider data. Merchant references are preserved separately from provider transaction IDs. Pending checkouts can be cancelled; completed payments cannot.
 
-## Production checklist
+Modes are `Disabled`, `Simulated`, and `Live`. Simulated references are HMAC-signed and clearly labelled; no money moves. Production configuration rejects simulated payments. Payout account numbers are AES-GCM encrypted and exposed only as masked values.
 
-- Set a strong `Jwt:SecretKey` (32+ random bytes). The app refuses to start otherwise.
-- Set `Flutterwave:Mode` to `Live` and provide live `SecretKey`, `PublicKey`, `SigningSecret`, `WebhookSecretHash`, `BaseUrl`, and `RedirectUrl`.
-- Register the webhook URL with Flutterwave and configure the same secret hash.
-- Set `Brevo:Enabled=true`, a valid API key, and a verified `FromAddress`.
-- Set AI and Cloudinary credentials.
-- Decide whether `Database:MigrateOnStartup` should run in production. Development always migrates and seeds.
-- Serve over HTTPS; the app calls `UseHttpsRedirection`.
-- Configure CORS at the host/proxy level if the frontend is on another origin. The app has no CORS policy.
-- Swagger is only enabled in Development.
-- Back up the database before applying migrations.
+## Errors and availability
 
----
+Failures use problem-style JSON with a status, title, optional detail/code, validation errors, and trace ID. Typical statuses are 400 (invalid input), 401 (session), 403 (access), 404 (missing resource), 409 (state conflict), 413 (upload limit), 429 (rate limit), and 503 (unavailable integration). Respect `Retry-After` where supplied. The proxy retains session cookies when a refresh fails transiently rather than treating a server outage as a bad password.
 
-## Known limitations
+`/health` is liveness. `/health/ready` checks database connectivity and pending migrations. `/api/health` on the web server checks API readiness. These endpoints disclose no credentials or account data.
 
-These are current implementation constraints, not frontend bugs.
+## Configuration and deployment
 
-1. **Login returns a refresh token; the refresh token is stored only as an SHA-256 hash.** This is safe.
-2. **`POST /api/auth/revoke` does not invalidate the current access token.** It revokes refresh tokens only. Use change-password to invalidate all JWTs, or wait for expiry.
-3. **No vet-request completion endpoint.** `VetRequest.Complete()` exists, but no API calls it, so `RequestStatus.Completed` is unreachable through HTTP.
-4. **No observation read endpoints.** Observations can be created and confirmed, but not listed or fetched.
-5. **No payment read endpoints.** Payments can be initiated and recorded, but not listed.
-6. **No treatment-plan list endpoint.** Only create and get-by-id are exposed.
-7. **No incident-action completion endpoint.** Actions are created and listed, but remain `Pending`.
-8. **No vet-request list endpoint.** Vet requests appear only in the dashboard.
-9. **Audit event creation is admin-only; reads remain available to any authenticated user.** `actorId` is taken from the JWT, not the payload.
-10. **Payout account numbers are stored unencrypted.** They are masked in API responses, but not encrypted at rest.
-11. **`MustChangePassword` is not enforced.** Temporary vet passwords work until the vet changes them.
-12. **Treatment-plan authorship is not verified.** `authoredByVetId` is a free-text string supplied by the caller.
-13. **No CORS policy.** Cross-origin browser clients will fail unless CORS is added or the SPA is served from the same origin.
-14. **Simulated payments do not move money.** `checkoutUrl` is `null`, and locally signed references are accepted by `/api/payments/record`.
-15. **Vets have narrow access.** Most farm-scoped endpoints return `403` for vets; only assigned vet requests, related incidents, prevention plans, treatment plans, and payments are accessible.
-16. **The dashboard DTO comment is stale.** `DashboardDto.VetRequests` is documented in code as “always empty”, but the handler populates it.
-17. **No automated tests.** Verification is currently limited to builds and manual smoke tests.
-18. **`POST /api/poultry/observations` binds internal pre-extraction fields.** `preExtracted` and `preAnalyzedVisionJson` are accepted by the public command model even though they are meant for internal callers.
+See `src/FarmHand.API/appsettings.example.json`, `web/.env.example`, `README.md`, and `DEPLOYMENT.md`. Production requires explicit host filtering, an independent field-encryption key, recovery email delivery, a public HTTPS URL, and persistent upload storage. Provider keys are supplied through the deployment's secret configuration. Demo data and rule-based demo extraction are not enabled in Production.

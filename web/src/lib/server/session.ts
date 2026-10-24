@@ -15,7 +15,7 @@ export const REFRESH_COOKIE = "fh_refresh";
 const REFRESH_MAX_AGE = 60 * 60 * 24 * 7;
 
 export function apiBaseUrl(): string {
-  const url = process.env.FARMHAND_API_URL ?? "http://127.0.0.1:5099";
+  const url = process.env.FARMHAND_API_URL ?? "http://127.0.0.1:5037";
   return url.replace(/\/+$/, "");
 }
 
@@ -101,12 +101,14 @@ export async function refreshTokens(refreshToken: string, request?: Request): Pr
         headers: { "content-type": "application/json", ...(request ? forwardedFor(request) : {}) },
         body: JSON.stringify({ refreshToken }),
         cache: "no-store",
+        signal: AbortSignal.timeout(15_000),
       });
-      if (!response.ok) return null;
+      if (response.status === 400 || response.status === 401) return null;
+      if (!response.ok) throw new Error("Session service unavailable.");
       const body = (await response.json()) as TokenPair;
       return { token: body.token, refreshToken: body.refreshToken, expiresAt: body.expiresAt };
     } catch {
-      return null;
+      throw new Error("Session service unavailable.");
     }
   })();
 

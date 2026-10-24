@@ -73,13 +73,13 @@ public class SpitchService
         };
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _apiKey);
 
-        var response = await _httpClient.SendAsync(request, ct);
+        using var response = await _httpClient.SendAsync(request, ct);
         var responseBody = await response.Content.ReadAsStringAsync(ct);
 
         if (!response.IsSuccessStatusCode)
         {
-            _logger.LogWarning("Spitch STT transcription failed: {StatusCode} {Body}", response.StatusCode, responseBody);
-            throw new HttpRequestException($"Spitch STT failed with status {response.StatusCode}: {responseBody}");
+            _logger.LogWarning("Spitch STT transcription failed with {StatusCode}", response.StatusCode);
+            throw new HttpRequestException("Spitch transcription is unavailable.", null, response.StatusCode);
         }
 
         using var doc = JsonDocument.Parse(responseBody);
@@ -123,12 +123,11 @@ public class SpitchService
         };
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _apiKey);
 
-        var response = await _httpClient.SendAsync(request, ct);
+        using var response = await _httpClient.SendAsync(request, ct);
         if (!response.IsSuccessStatusCode)
         {
-            var err = await response.Content.ReadAsStringAsync(ct);
-            _logger.LogWarning("Spitch TTS failed: {StatusCode} {Body}", response.StatusCode, err);
-            throw new HttpRequestException($"Spitch TTS failed with status {response.StatusCode}: {err}");
+            _logger.LogWarning("Spitch TTS failed with {StatusCode}", response.StatusCode);
+            throw new HttpRequestException("Spitch speech synthesis is unavailable.", null, response.StatusCode);
         }
 
         var audioBytes = await response.Content.ReadAsByteArrayAsync(ct);
