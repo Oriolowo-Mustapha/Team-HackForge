@@ -33,7 +33,7 @@ export function Panel({
   children: ReactNode;
 }) {
   return (
-    <section className="rounded-[28px] bg-paper p-5 ring-1 ring-line/60 sm:p-6">
+    <section className="min-w-0 rounded-[28px] bg-paper p-5 ring-1 ring-line/60 sm:p-6">
       {title && <h2 className="mb-4 text-lg font-semibold">{title}</h2>}
       {children}
     </section>
@@ -53,7 +53,7 @@ export function Pager({
   return (
     <nav
       aria-label="Pagination"
-      className="mt-5 flex items-center justify-between gap-3"
+      className="mt-5 flex flex-wrap items-center justify-between gap-3"
     >
       <Button
         variant="secondary"

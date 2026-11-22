@@ -48,8 +48,11 @@ export function DailyColumns({ points, label, unit }: { points: Point[]; label: 
         {active !== null && points[active] && (
           <div
             role="status"
-            className="pointer-events-none absolute -top-2 z-10 -translate-x-1/2 -translate-y-full rounded-xl bg-ink px-3 py-2 text-cream shadow-lift"
-            style={{ left: `${((active + 0.5) / points.length) * 100}%` }}
+            className={cn(
+              "pointer-events-none absolute -top-2 z-10 max-w-full -translate-y-full rounded-xl bg-ink px-3 py-2 text-cream shadow-lift",
+              active <= 2 ? "left-0" : active >= points.length - 3 ? "right-0" : "-translate-x-1/2",
+            )}
+            style={active > 2 && active < points.length - 3 ? { left: `${((active + 0.5) / points.length) * 100}%` } : undefined}
           >
             <div className="text-base font-semibold leading-none tabular">{points[active].value}</div>
             <div className="mt-1 whitespace-nowrap text-[11px] text-cream/75">

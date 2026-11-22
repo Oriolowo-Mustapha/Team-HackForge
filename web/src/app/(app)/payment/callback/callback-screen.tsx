@@ -96,8 +96,8 @@ export function CallbackScreen() {
             <dd className="font-semibold">{formatMoney(payment.totalAmount, payment.currency)}</dd>
           </div>
           <div className="flex items-baseline justify-between gap-4">
-            <dt className="text-muted">Reference</dt>
-            <dd className="truncate font-medium">{payment.transactionReference}</dd>
+            <dt className="shrink-0 text-muted">Reference</dt>
+            <dd className="min-w-0 truncate font-medium">{payment.transactionReference}</dd>
           </div>
           <div className="flex items-baseline justify-between gap-4">
             <dt className="text-muted">Status</dt>

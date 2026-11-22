@@ -6,6 +6,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { paymentsApi } from "@/lib/api/endpoints";
 import { newIdempotencyKey } from "@/lib/api/client";
+import { cn } from "@/lib/cn";
 import { qk } from "@/lib/queries";
 import { formatMoney } from "@/lib/format";
 import { PaymentStatusBadge } from "@/components/domain/badges";
@@ -150,9 +151,9 @@ export function PayScreen({ vetRequestId }: { vetRequestId: string }) {
 
 function FeeRow({ label, value, strong = false }: { label: string; value: string; strong?: boolean }) {
   return (
-    <div className="flex items-baseline justify-between gap-4">
+    <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
       <dt className={strong ? "font-semibold" : "text-muted"}>{label}</dt>
-      <dd className={strong ? "text-[17px] font-semibold" : "font-medium"}>{value}</dd>
+      <dd className={cn("min-w-0 break-words", strong ? "text-[17px] font-semibold" : "font-medium")}>{value}</dd>
     </div>
   );
 }
@@ -168,7 +169,7 @@ function PaidView({ payment }: { payment: Payment }) {
           : `${payment.status} — ${payment.failureReason ?? "check the payment history for details."}`}
       </Notice>
       <Card>
-        <div className="flex items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="min-w-0">
             <p className="text-[15px] font-semibold">{formatMoney(payment.totalAmount, payment.currency)}</p>
             <p className="mt-1 truncate text-[13px] text-muted">Ref {payment.transactionReference}</p>

@@ -25,14 +25,21 @@ import { Stat } from "@/components/ui/stat";
 import { EmptyState, InlineError, Notice } from "@/components/ui/states";
 
 function Table({
+  label,
   headings,
   children,
 }: {
+  label: string;
   headings: string[];
   children: ReactNode;
 }) {
   return (
-    <div className="overflow-x-auto rounded-[24px] bg-paper ring-1 ring-line/60">
+    <div
+      tabIndex={0}
+      role="region"
+      aria-label={label}
+      className="w-full max-w-full overflow-x-auto rounded-[24px] bg-paper ring-1 ring-line/60"
+    >
       <table className="w-full text-left text-sm">
         <thead className="border-b border-line">
           <tr>
@@ -224,7 +231,7 @@ export function AdminUsersScreen() {
         {(data) => (
           <>
             {data.items.length ? (
-              <Table headings={["Account", "Role", "Status", "Access"]}>
+              <Table label="Users" headings={["Account", "Role", "Status", "Access"]}>
                 {data.items.map((item) => (
                   <tr key={item.id}>
                     <td>
@@ -444,6 +451,7 @@ export function AdminVetsScreen() {
           <>
             {data.items.length ? (
               <Table
+                label="Veterinarians"
                 headings={[
                   "Veterinarian",
                   "Specialization",
@@ -597,7 +605,7 @@ export function AdminFarmsScreen() {
         {(data) => (
           <>
             {data.items.length ? (
-              <Table headings={["Farm", "Location", "Owner", "Created"]}>
+              <Table label="Farms" headings={["Farm", "Location", "Owner", "Created"]}>
                 {data.items.map((farm) => (
                   <tr key={farm.id}>
                     <td className="font-semibold">{farm.displayName}</td>
@@ -756,7 +764,7 @@ export function AdminAuditScreen() {
         {(data) => (
           <>
             {data.items.length ? (
-              <Table headings={["Time", "Event", "Actor", "Details"]}>
+              <Table label="Audit events" headings={["Time", "Event", "Actor", "Details"]}>
                 {data.items.map((event) => (
                   <tr key={event.id}>
                     <td className="whitespace-nowrap">

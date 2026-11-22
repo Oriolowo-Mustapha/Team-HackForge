@@ -440,33 +440,98 @@ test("offline navigation uses a public fallback", async ({ page, context }) => {
   await context.setOffline(false);
 });
 
-test("farmer dashboard fits a phone and exposes mobile navigation", async ({
+test("public and farmer screens fit narrow phones without horizontal overflow and expose mobile navigation", async ({
   playwright,
   browser,
 }) => {
   const farmer = await loginApi(playwright, "farmer@farmhand.ai");
-  const context = await browser.newContext({
-    baseURL,
-    viewport: { width: 390, height: 844 },
-    storageState: await farmer.storageState(),
-  });
+  const session = await (await farmer.get("/api/session")).json();
+  const farmId = session.user.farms[0].id;
+  const groups = await json(
+    farmer,
+    `livestock/categories/details?farmId=${farmId}`,
+  );
+  const scanCaptureRoute = groups[0]?.id ? `/scan?group=${groups[0].id}` : null;
+  const viewports = [
+    { width: 320, height: 568 },
+    { width: 390, height: 844 },
+  ];
+  const publicRoutes = ["/", "/login", "/register", "/about"];
+  const farmerRoutes = [
+    "/home",
+    "/animals",
+    "/reports",
+    "/cases",
+    "/vets",
+    "/payments",
+    "/profile",
+    "/scan",
+    ...(scanCaptureRoute ? [scanCaptureRoute] : []),
+  ];
+
   try {
-    const page = await context.newPage();
-    await page.goto("/home");
-    await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
-    await expect(
-      page.getByRole("navigation", { name: "Main", exact: true }),
-    ).toBeVisible();
-    expect(
-      await page.evaluate(
-        () => document.documentElement.scrollWidth <= window.innerWidth + 1,
-      ),
-    ).toBe(true);
-    await expect(
-      page.getByRole("link", { name: "Report a health concern", exact: true }),
-    ).toBeVisible();
+    for (const viewport of viewports) {
+      const publicContext = await browser.newContext({ baseURL, viewport });
+      try {
+        const publicPage = await publicContext.newPage();
+        for (const route of publicRoutes) {
+          await publicPage.goto(route);
+          await expect(publicPage.getByRole("heading", { level: 1 })).toBeVisible();
+          const overflow = await publicPage.evaluate(() => ({
+            scrollWidth: document.documentElement.scrollWidth,
+            innerWidth: window.innerWidth,
+          }));
+          expect(
+            overflow.scrollWidth,
+            `horizontal overflow on ${route} at ${viewport.width}x${viewport.height}`,
+          ).toBeLessThanOrEqual(overflow.innerWidth + 1);
+        }
+      } finally {
+        await publicContext.close();
+      }
+
+      const farmerContext = await browser.newContext({
+        baseURL,
+        viewport,
+        storageState: await farmer.storageState(),
+      });
+      try {
+        const page = await farmerContext.newPage();
+        for (const route of farmerRoutes) {
+          await page.goto(route);
+          const isScan = route === "/scan" || route.startsWith("/scan?");
+          if (route === "/scan") {
+            await expect(
+              page.getByText("Who is it about?", { exact: true }),
+            ).toBeVisible();
+          } else {
+            await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+          }
+          await expect(
+            page.getByRole("status", { name: "Loading", exact: true }),
+          ).toHaveCount(0);
+          if (!isScan) {
+            await expect(
+              page.getByRole("navigation", { name: "Main", exact: true }),
+            ).toBeVisible();
+            await expect(
+              page.getByRole("link", { name: "Report a health concern", exact: true }),
+            ).toBeVisible();
+          }
+          const overflow = await page.evaluate(() => ({
+            scrollWidth: document.documentElement.scrollWidth,
+            innerWidth: window.innerWidth,
+          }));
+          expect(
+            overflow.scrollWidth,
+            `horizontal overflow on ${route} at ${viewport.width}x${viewport.height}`,
+          ).toBeLessThanOrEqual(overflow.innerWidth + 1);
+        }
+      } finally {
+        await farmerContext.close();
+      }
+    }
   } finally {
-    await context.close();
     await farmer.dispose();
   }
 });

@@ -89,7 +89,7 @@ export function HomeDashboard() {
   return (
     <div className="space-y-6">
       <div className="flex items-end justify-between gap-4 pt-1">
-        <div>
+        <div className="min-w-0">
           <p className="text-[13px] font-semibold text-muted">{formatDate(now, { weekday: "long", day: "numeric", month: "long" })}</p>
           <h1 className="mt-1 text-[28px] font-semibold leading-tight tracking-[-0.03em] sm:text-[34px]">
             {greeting(now)}, {firstName(user?.fullName)}
@@ -121,7 +121,7 @@ function DashboardBody({ data, drafts }: { data: Dashboard; drafts: ReportDraft[
 
   return (
     <div className="grid gap-6 lg:grid-cols-12">
-      <div className="space-y-6 lg:col-span-7 xl:col-span-8">
+      <div className="min-w-0 space-y-6 lg:col-span-7 xl:col-span-8">
         {/* Next best action */}
         <section
           aria-label="What to do next"
@@ -140,7 +140,7 @@ function DashboardBody({ data, drafts }: { data: Dashboard; drafts: ReportDraft[
         {drafts.length > 0 && (
           <Link href="/scan?drafts=1" className="flex items-center gap-3 rounded-[24px] bg-olive-soft p-4 text-olive-ink hover:brightness-[0.98]">
             <CloudOff className="size-5 shrink-0" aria-hidden />
-            <span className="flex-1 text-sm font-semibold">
+            <span className="min-w-0 flex-1 text-sm font-semibold">
               {pluralize(drafts.length, "unsent report")} saved on this device. Open to send {drafts.length === 1 ? "it" : "them"}.
             </span>
             <ArrowRight className="size-4" aria-hidden />
@@ -243,7 +243,7 @@ function DashboardBody({ data, drafts }: { data: Dashboard; drafts: ReportDraft[
         </section>
       </div>
 
-      <aside className="space-y-6 lg:col-span-5 xl:col-span-4" aria-label="Farm health summary">
+      <aside className="min-w-0 space-y-6 lg:col-span-5 xl:col-span-4" aria-label="Farm health summary">
         <Card className="pb-4">
           <CardTitle action={<Link href="/scan" className="rounded-lg text-sm font-semibold text-terracotta-ink hover:underline">Check now</Link>}>
             Daily checks

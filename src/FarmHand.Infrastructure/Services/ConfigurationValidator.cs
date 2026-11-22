@@ -16,7 +16,8 @@ public static class ConfigurationValidator
         {
             if (Placeholder(configuration[key])) throw new InvalidOperationException($"{key} must be configured with a real value.");
         }
-        var mode = configuration["Flutterwave:Mode"] ?? "Disabled";
+        var rawMode = configuration["Flutterwave:Mode"];
+        var mode = string.IsNullOrWhiteSpace(rawMode) ? "Disabled" : rawMode.Trim();
         if (!new[] { "Disabled", "Simulated", "Live" }.Contains(mode, StringComparer.OrdinalIgnoreCase))
             throw new InvalidOperationException("Flutterwave:Mode must be Disabled, Simulated, or Live.");
         if (mode.Equals("Live", StringComparison.OrdinalIgnoreCase))

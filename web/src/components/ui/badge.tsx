@@ -17,10 +17,10 @@ const tones: Record<Tone, { pill: string; dot: string }> = {
 export function Badge({ tone = "neutral", children, icon, className, dot = false }: { tone?: Tone; children: ReactNode; icon?: ReactNode; className?: string; dot?: boolean }) {
   const t = tones[tone];
   return (
-    <span className={cn("inline-flex h-6 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-xs font-semibold whitespace-nowrap", t.pill, className)}>
-      {dot && <span aria-hidden className={cn("size-1.5 rounded-full", t.dot)} />}
+    <span className={cn("inline-flex min-h-6 max-w-full shrink-0 items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-semibold [&_svg]:shrink-0", t.pill, className)}>
+      {dot && <span aria-hidden className={cn("size-1.5 shrink-0 rounded-full", t.dot)} />}
       {icon}
-      {children}
+      <span className="min-w-0 break-words">{children}</span>
     </span>
   );
 }

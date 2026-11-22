@@ -34,7 +34,9 @@ if (args.Contains("--check-health", StringComparer.OrdinalIgnoreCase))
     using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
     try
     {
-        var port = Environment.GetEnvironmentVariable("ASPNETCORE_HTTP_PORTS")?.Split(';')[0] ?? "8080";
+        var port = Environment.GetEnvironmentVariable("PORT")
+            ?? Environment.GetEnvironmentVariable("ASPNETCORE_HTTP_PORTS")?.Split(';')[0]
+            ?? "8080";
         var response = await client.GetAsync($"http://127.0.0.1:{port}/health/ready");
         Environment.ExitCode = response.IsSuccessStatusCode ? 0 : 1;
     }
@@ -44,6 +46,13 @@ if (args.Contains("--check-health", StringComparer.OrdinalIgnoreCase))
 }
 
 var builder = WebApplication.CreateBuilder(args);
+
+if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("ASPNETCORE_URLS"))
+    && Environment.GetEnvironmentVariable("PORT") is { Length: > 0 } renderPort
+    && int.TryParse(renderPort, out var parsedPort) && parsedPort is > 0 and <= 65535)
+{
+    builder.WebHost.UseUrls($"http://0.0.0.0:{parsedPort}");
+}
 
 const long MaxRequestBytes = 25 * 1024 * 1024;
 builder.WebHost.ConfigureKestrel(options => options.Limits.MaxRequestBodySize = MaxRequestBytes);

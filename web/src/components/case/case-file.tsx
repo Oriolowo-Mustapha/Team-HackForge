@@ -70,14 +70,14 @@ export function CaseFile({ id, openRequest }: { id: string; openRequest?: boolea
       <PageHeader back={back} eyebrow={`${data.farmName} · opened ${formatRelative(incident.detectedAt)}`} title={incident.incidentType} />
 
       <div className="grid gap-6 lg:grid-cols-12">
-        <div className="space-y-6 lg:col-span-7">
+        <div className="min-w-0 space-y-6 lg:col-span-7">
           <Summary data={data} />
           <VetSection data={data} onRequest={() => setRequesting(true)} />
           {data.treatmentPlans.length > 0 && <TreatmentPlans plans={data.treatmentPlans} incidentId={incident.id} canWrite={canWrite} />}
           <ActionsSection data={data} canWrite={canWrite && !closed} />
           <FollowUpsSection data={data} canWrite={canWrite && !closed} />
         </div>
-        <aside className="space-y-6 lg:col-span-5">
+        <aside className="min-w-0 space-y-6 lg:col-span-5">
           {canWrite && data.allowedTransitions.length > 0 && <StatusControl data={data} />}
           {data.sourceObservation?.assessment && (
             <div>
@@ -222,24 +222,24 @@ function RequestCard({ request, incidentId }: { request: VetRequest; incidentId:
         </div>
       </div>
       <dl className="mt-4 grid grid-cols-2 gap-3 text-sm sm:grid-cols-3">
-        <div>
+        <div className="min-w-0">
           <dt className="text-muted">Fee</dt>
-          <dd className="font-semibold">{request.farmerCost > 0 ? formatMoney(request.farmerCost, request.currency) : "No fee"}</dd>
+          <dd className="break-words font-semibold">{request.farmerCost > 0 ? formatMoney(request.farmerCost, request.currency) : "No fee"}</dd>
         </div>
-        <div>
+        <div className="min-w-0">
           <dt className="text-muted">Requested</dt>
-          <dd className="font-semibold">{formatRelative(request.createdAt)}</dd>
+          <dd className="break-words font-semibold">{formatRelative(request.createdAt)}</dd>
         </div>
         {request.preferredVisitDate && (
-          <div>
+          <div className="min-w-0">
             <dt className="text-muted">Preferred date</dt>
-            <dd className="font-semibold">{formatDate(request.preferredVisitDate)}</dd>
+            <dd className="break-words font-semibold">{formatDate(request.preferredVisitDate)}</dd>
           </div>
         )}
         {request.respondedAt && (
-          <div>
+          <div className="min-w-0">
             <dt className="text-muted">Accepted</dt>
-            <dd className="font-semibold">{formatRelative(request.respondedAt)}</dd>
+            <dd className="break-words font-semibold">{formatRelative(request.respondedAt)}</dd>
           </div>
         )}
       </dl>
@@ -332,7 +332,7 @@ function TreatmentPlans({ plans, incidentId, canWrite }: { plans: TreatmentPlan[
               From {plan.authorName ?? "your vet"} · {formatDate(plan.createdAt)}
             </p>
             <div className="mt-1 flex items-center justify-between">
-              <p className="whitespace-pre-line text-[15px] leading-relaxed">{plan.instructionsText}</p>
+              <p className="min-w-0 break-words whitespace-pre-line text-[15px] leading-relaxed">{plan.instructionsText}</p>
             </div>
             <ListenButton text={plan.instructionsText} label="Listen to instructions" variant="pill" className="mt-3" />
             {plan.schedule.length > 0 && (
@@ -420,13 +420,15 @@ function ActionsSection({ data, canWrite }: { data: IncidentCase; canWrite: bool
         </ul>
         {canWrite && (
           <form onSubmit={submit} className="mt-4 flex flex-col gap-2 border-t border-line pt-4 sm:flex-row">
-            <Input value={description} onChange={(e) => setDescription(e.target.value.slice(0, 500))} placeholder="Add an action…" aria-label="New action" />
-            <div className="flex gap-2">
-              <Select value={priority} onChange={(e) => setPriority(e.target.value)} aria-label="Priority" className="w-32">
-                <option>High</option>
-                <option>Medium</option>
-                <option>Low</option>
-              </Select>
+            <Input value={description} onChange={(e) => setDescription(e.target.value.slice(0, 500))} placeholder="Add an action…" aria-label="New action" className="min-w-0 flex-1" />
+            <div className="flex min-w-0 gap-2">
+              <div className="min-w-0 flex-1 sm:flex-none">
+                <Select value={priority} onChange={(e) => setPriority(e.target.value)} aria-label="Priority" className="w-full sm:w-32">
+                  <option>High</option>
+                  <option>Medium</option>
+                  <option>Low</option>
+                </Select>
+              </div>
               <Button type="submit" loading={add.isPending} disabled={description.trim().length < 3} icon={<Plus className="size-4" />}>
                 Add
               </Button>

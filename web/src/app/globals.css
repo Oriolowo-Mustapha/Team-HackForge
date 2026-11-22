@@ -78,6 +78,13 @@
     -webkit-text-size-adjust: 100%;
     -webkit-tap-highlight-color: transparent;
     text-rendering: optimizeLegibility;
+    scroll-padding-bottom: calc(6.5rem + env(safe-area-inset-bottom, 0px));
+  }
+
+  @media (min-width: 1024px) {
+    html {
+      scroll-padding-bottom: 1.5rem;
+    }
   }
 
   body {
@@ -86,6 +93,11 @@
     font-family: var(--font-sans);
     font-feature-settings: "ss01", "cv11";
     min-height: 100dvh;
+    overflow-wrap: break-word;
+  }
+
+  :where(a, code) {
+    overflow-wrap: anywhere;
   }
 
   ::selection {

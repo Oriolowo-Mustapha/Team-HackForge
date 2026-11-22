@@ -25,7 +25,7 @@ export function CheckInArc({ days, caption }: { days: Day[]; caption?: string })
 
   return (
     <figure className="relative mx-auto w-full max-w-[340px]" aria-label={`Health checks recorded on ${checked} of the last ${total} days`}>
-      <svg viewBox={`0 0 ${size} 220`} className="w-full overflow-visible" role="img" aria-hidden="true">
+      <svg viewBox={`0 0 ${size} 220`} className="block w-full overflow-visible" role="img" aria-hidden="true">
         {days.map((day, i) => {
           const angle = start + i * step;
           const filled = day.observations > 0;

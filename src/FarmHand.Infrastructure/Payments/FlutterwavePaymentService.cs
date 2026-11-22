@@ -47,7 +47,7 @@ public class FlutterwavePaymentService : IPaymentService
             : $"{publicUrl}/payments/return";
         _logger = logger;
 
-        var mode = configuration["Flutterwave:Mode"];
+        var mode = configuration["Flutterwave:Mode"]?.Trim();
         Mode = string.Equals(mode, "Live", StringComparison.OrdinalIgnoreCase) ? "Live"
             : string.Equals(mode, "Simulated", StringComparison.OrdinalIgnoreCase) ? "Simulated"
             : "Disabled";

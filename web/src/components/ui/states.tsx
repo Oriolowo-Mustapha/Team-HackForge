@@ -76,7 +76,7 @@ export function InlineError({ error, className }: { error: unknown; className?: 
   return (
     <div role="alert" className={cn("flex items-start gap-2.5 rounded-2xl bg-red-soft px-4 py-3 text-sm font-medium text-red-ink", className)}>
       <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-      <span>{message}</span>
+      <span className="min-w-0 flex-1 break-words">{message}</span>
     </div>
   );
 }
@@ -91,7 +91,7 @@ export function Notice({ tone = "info", icon, title, children, className }: { to
   return (
     <div className={cn("flex items-start gap-3 rounded-2xl px-4 py-3 text-sm leading-relaxed", tones[tone], className)}>
       {icon && <span className="mt-0.5 shrink-0 [&_svg]:size-4">{icon}</span>}
-      <div>
+      <div className="min-w-0 flex-1">
         {title && <p className="font-semibold">{title}</p>}
         <div>{children}</div>
       </div>

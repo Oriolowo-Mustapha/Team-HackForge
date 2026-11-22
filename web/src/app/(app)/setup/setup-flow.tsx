@@ -213,7 +213,7 @@ export function SetupFlow({ another }: { another: boolean }) {
         </p>
       </div>
 
-      <main className="mx-auto w-full max-w-[520px] px-5 pb-12 pt-[max(20px,env(safe-area-inset-top))] sm:px-8 lg:flex lg:flex-col lg:justify-center lg:py-16">
+      <main className="mx-auto w-full max-w-[520px] overflow-x-clip px-5 pb-12 pt-[max(20px,env(safe-area-inset-top))] sm:px-8 lg:flex lg:flex-col lg:justify-center lg:py-16">
         <div className="mb-8 flex items-center justify-between">
           <BrandMark className="size-10" />
           <div className="flex items-center gap-2" aria-label={`Step ${step} of 2`}>
@@ -264,7 +264,7 @@ export function SetupFlow({ another }: { another: boolean }) {
                   <div className="space-y-2">
                     {farm.latitude !== null && farm.longitude !== null ? (
                       <div className="rounded-2xl border border-green-ink/20 bg-green-ink/5 p-4 space-y-2">
-                        <div className="flex items-start justify-between gap-3">
+                        <div className="flex flex-wrap items-start justify-between gap-2">
                           <div className="flex items-center gap-2 text-green-ink font-semibold text-sm">
                             <MapPin className="size-4 shrink-0" />
                             <span>GPS Location Locked</span>

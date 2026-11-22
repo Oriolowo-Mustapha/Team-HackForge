@@ -30,11 +30,11 @@ export function ProfileScreen() {
     <div className="mx-auto max-w-2xl space-y-5">
       <header className="flex items-center gap-4">
         <Avatar name={user.fullName ?? user.email} className="size-16 text-lg" tone={user.role === "Farmer" ? "terracotta" : "beige"} />
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <h1 className="truncate text-[26px] font-semibold leading-tight tracking-[-0.025em]">{user.fullName ?? firstName(user.email)}</h1>
           <p className="mt-0.5 flex flex-wrap items-center gap-2">
             <Badge tone={user.role === "Vet" ? "healthy" : "neutral"}>{roleLabel}</Badge>
-            <span className="truncate text-[14px] text-muted">{user.email}</span>
+            <span className="min-w-0 max-w-full truncate text-[14px] text-muted">{user.email}</span>
           </p>
         </div>
       </header>

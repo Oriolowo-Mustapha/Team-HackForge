@@ -116,7 +116,7 @@ export function VoiceRecorder({
             <p className="mb-3 text-sm font-semibold">Voice note · {formatDuration(durationMs)}</p>
             <audio src={url} controls className="w-full" />
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap justify-center gap-2">
             <button type="button" onClick={() => onAudio(null, null)} className="inline-flex h-12 items-center gap-2 rounded-full bg-cream/10 px-5 text-sm font-semibold hover:bg-cream/15">
               <Trash2 className="size-4" aria-hidden /> Remove
             </button>
@@ -127,9 +127,9 @@ export function VoiceRecorder({
         </>
       ) : (
         <>
-          <div className="flex h-24 w-full max-w-sm items-center justify-center gap-[3px]" aria-hidden>
+          <div className="flex h-24 w-full max-w-sm items-center justify-center gap-[3px] overflow-hidden" aria-hidden>
             {levels.map((level, i) => (
-              <span key={i} className={cn("w-[5px] rounded-full transition-[height] duration-100", recording ? "bg-terracotta" : "bg-cream/25")} style={{ height: `${Math.round(level * 96)}px` }} />
+              <span key={i} className={cn("min-w-0 flex-1 max-w-[5px] rounded-full transition-[height] duration-100", recording ? "bg-terracotta" : "bg-cream/25")} style={{ height: `${Math.round(level * 96)}px` }} />
             ))}
           </div>
           <p className="text-[40px] font-semibold leading-none tracking-[-0.03em] tabular" aria-live="off">

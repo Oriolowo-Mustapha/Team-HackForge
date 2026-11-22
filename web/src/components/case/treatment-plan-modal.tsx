@@ -54,29 +54,32 @@ export function TreatmentPlanModal({ open, onOpenChange, vetRequestId, incidentI
         <div className="space-y-2">
           <p className="text-sm font-semibold">Schedule</p>
           {steps.map((step, i) => (
-            <div key={i} className="flex gap-2">
+            <div key={i} className="flex flex-col gap-2 sm:flex-row sm:items-center">
               <Input
                 aria-label={`Step ${i + 1}`}
                 value={step.action}
                 onChange={(e) => setSteps((list) => list.map((s, j) => (j === i ? { ...s, action: e.target.value.slice(0, 200) } : s)))}
                 placeholder="e.g. Start medicated water (day 1 of 5)"
+                className="min-w-0 flex-1"
               />
-              <Input
-                aria-label={`Step ${i + 1} due date`}
-                type="date"
-                value={step.dueDate}
-                onChange={(e) => setSteps((list) => list.map((s, j) => (j === i ? { ...s, dueDate: e.target.value } : s)))}
-                className="w-40 shrink-0"
-              />
-              <button
-                type="button"
-                onClick={() => setSteps((list) => list.filter((_, j) => j !== i))}
-                disabled={steps.length === 1}
-                className="inline-flex size-12 shrink-0 items-center justify-center rounded-2xl text-muted hover:bg-sand disabled:opacity-30"
-                aria-label={`Remove step ${i + 1}`}
-              >
-                <Trash2 className="size-4" />
-              </button>
+              <div className="flex items-center gap-2">
+                <Input
+                  aria-label={`Step ${i + 1} due date`}
+                  type="date"
+                  value={step.dueDate}
+                  onChange={(e) => setSteps((list) => list.map((s, j) => (j === i ? { ...s, dueDate: e.target.value } : s)))}
+                  className="min-w-0 flex-1 sm:w-40 sm:flex-none"
+                />
+                <button
+                  type="button"
+                  onClick={() => setSteps((list) => list.filter((_, j) => j !== i))}
+                  disabled={steps.length === 1}
+                  className="inline-flex size-12 shrink-0 items-center justify-center rounded-2xl text-muted hover:bg-sand disabled:opacity-30"
+                  aria-label={`Remove step ${i + 1}`}
+                >
+                  <Trash2 className="size-4" />
+                </button>
+              </div>
             </div>
           ))}
           <Button size="sm" variant="ghost" icon={<Plus className="size-4" />} onClick={() => setSteps((list) => [...list, { action: "", dueDate: today() }])}>

@@ -319,7 +319,7 @@ export function Scanner({ initial, draftId, showDrafts }: { initial: { group?: s
       ) : (
         <div className="grid flex-1 gap-5 pt-3 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)] lg:gap-8">
           {/* Scanner panel */}
-          <section aria-label="Capture" className="flex flex-col rounded-[34px] bg-ink p-3 text-cream shadow-lift">
+          <section aria-label="Capture" className="flex min-w-0 flex-col rounded-[34px] bg-ink p-3 text-cream shadow-lift">
             <div id="report-capture" role="tabpanel" aria-labelledby={`report-tab-${mode}`} className="h-[min(58dvh,520px)] min-h-[340px] lg:h-[560px]">
               {mode === "photo" ? (
                 <CameraCapture image={image} onImage={setImage} />
@@ -403,20 +403,20 @@ export function Scanner({ initial, draftId, showDrafts }: { initial: { group?: s
                     document.getElementById(`report-tab-${selected}`)?.focus();
                   }}
                   className={cn(
-                    "relative inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-full text-sm font-semibold transition-colors",
+                    "relative inline-flex h-11 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-full px-2 text-sm font-semibold transition-colors",
                     mode === tab.key ? "bg-terracotta text-white" : "text-cream/70 hover:text-cream",
                   )}
                 >
-                  <tab.icon className="size-4" aria-hidden />
-                  {tab.label}
-                  {tab.has && <span className="absolute right-3 top-2 size-2 rounded-full bg-green" aria-label="added" />}
+                  <tab.icon className="size-4 shrink-0" aria-hidden />
+                  <span className="truncate">{tab.label}</span>
+                  {tab.has && <span className="absolute right-2 top-1.5 size-2 rounded-full bg-green" aria-label="added" />}
                 </button>
               ))}
             </div>
           </section>
 
           {/* Report tray */}
-          <section aria-label="Your report" className="flex flex-col gap-4">
+          <section aria-label="Your report" className="flex min-w-0 flex-col gap-4">
             <div>
               <h1 className="text-[24px] font-semibold tracking-[-0.02em]">Your report</h1>
               <p className="mt-1 text-sm text-muted">Combine a photo, a voice note and a few words — the more detail, the better the summary.</p>
@@ -428,16 +428,16 @@ export function Scanner({ initial, draftId, showDrafts }: { initial: { group?: s
                 { key: "voice", icon: Mic, label: "Voice", value: audio ? formatDuration(audioMs) : "None", on: Boolean(audio) },
                 { key: "text", icon: Type, label: "Note", value: text.trim() ? `${text.trim().split(/\s+/).length} words` : "None", on: Boolean(text.trim()) },
               ].map((c) => (
-                <li key={c.key}>
+                <li key={c.key} className="min-w-0">
                   <button
                     type="button"
                     onClick={() => setMode(c.key as Mode)}
-                    className={cn("flex w-full flex-col items-start gap-2 rounded-[20px] p-3 text-left ring-1", c.on ? "bg-paper ring-ink/80" : "bg-paper/60 ring-line")}
+                    className={cn("flex w-full min-w-0 flex-col items-start gap-2 rounded-[20px] p-3 text-left ring-1", c.on ? "bg-paper ring-ink/80" : "bg-paper/60 ring-line")}
                   >
-                    <c.icon className={cn("size-5", c.on ? "text-terracotta-ink" : "text-faint")} aria-hidden />
-                    <span>
-                      <span className="block text-sm font-semibold">{c.label}</span>
-                      <span className="block text-xs text-muted">{c.value}</span>
+                    <c.icon className={cn("size-5 shrink-0", c.on ? "text-terracotta-ink" : "text-faint")} aria-hidden />
+                    <span className="w-full min-w-0">
+                      <span className="block truncate text-sm font-semibold">{c.label}</span>
+                      <span className="block truncate text-xs text-muted">{c.value}</span>
                     </span>
                   </button>
                 </li>
@@ -458,7 +458,7 @@ export function Scanner({ initial, draftId, showDrafts }: { initial: { group?: s
                 </span>
               </button>
               {showNumbers && (
-                <div className="grid grid-cols-2 gap-3 border-t border-line px-4 pb-4 pt-3">
+                <div className="grid grid-cols-1 gap-3 border-t border-line px-4 pb-4 pt-3 min-[360px]:grid-cols-2">
                   <Field label="Deaths">
                     <Input inputMode="numeric" value={manual.mortalityCount} onChange={(e) => setManual((m) => ({ ...m, mortalityCount: e.target.value.replace(/[^\d]/g, "").slice(0, 5) }))} placeholder="0" />
                   </Field>
@@ -471,7 +471,7 @@ export function Scanner({ initial, draftId, showDrafts }: { initial: { group?: s
                   <Field label="Water">
                     <Input value={manual.water} onChange={(e) => setManual((m) => ({ ...m, water: e.target.value.slice(0, 100) }))} placeholder="normal / more" />
                   </Field>
-                  <p className="col-span-2 text-xs text-faint">You can also correct numbers on the next screen before saving.</p>
+                  <p className="text-xs text-faint min-[360px]:col-span-2">You can also correct numbers on the next screen before saving.</p>
                 </div>
               )}
             </div>

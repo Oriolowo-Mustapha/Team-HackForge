@@ -41,11 +41,11 @@ export function AnimalDetail({ id }: { id: string }) {
     <div>
       <PageHeader back="/animals" title={animal.name} eyebrow={animal.categoryName ?? undefined} className="lg:hidden" />
       <div className="grid gap-6 lg:grid-cols-12">
-        <div className="space-y-6 lg:col-span-5">
+        <div className="min-w-0 space-y-6 lg:col-span-5">
           <Hero animal={animal} />
           <HealthProfile animal={animal} />
         </div>
-        <div className="space-y-6 lg:col-span-7">
+        <div className="min-w-0 space-y-6 lg:col-span-7">
           <section>
             <SectionHeader title="Open cases" count={open.length} />
             {open.length ? (
@@ -125,16 +125,18 @@ function Hero({ animal }: { animal: Animal }) {
           <Image src={`${speciesPhoto(animal.species, animal.id)}.webp`} alt="" fill priority sizes="(min-width: 1024px) 40vw, 100vw" className="object-cover" />
         )}
         <div className="absolute inset-0 bg-gradient-to-t from-ink/70 via-transparent to-transparent" aria-hidden />
-        {!photo && <span className="absolute left-4 top-4 rounded-full bg-ink/60 px-3 py-1 text-xs font-semibold text-cream backdrop-blur">Illustrative photo</span>}
-        <button
-          type="button"
-          onClick={() => fileRef.current?.click()}
-          disabled={upload.isPending}
-          className="absolute right-4 top-4 inline-flex h-10 items-center gap-2 rounded-full bg-paper/95 px-4 text-sm font-semibold text-ink shadow-soft hover:bg-white disabled:opacity-60"
-        >
-          {upload.isPending ? <Spinner className="size-4" /> : <Camera className="size-4" aria-hidden />}
-          {photo ? "Change photo" : "Add photo"}
-        </button>
+        <div className="absolute inset-x-3 top-3 flex flex-wrap items-center justify-between gap-2">
+          {!photo ? <span className="rounded-full bg-ink/60 px-3 py-1 text-xs font-semibold text-cream backdrop-blur">Illustrative photo</span> : <span />}
+          <button
+            type="button"
+            onClick={() => fileRef.current?.click()}
+            disabled={upload.isPending}
+            className="inline-flex h-10 items-center gap-2 rounded-full bg-paper/95 px-4 text-sm font-semibold text-ink shadow-soft hover:bg-white disabled:opacity-60"
+          >
+            {upload.isPending ? <Spinner className="size-4" /> : <Camera className="size-4" aria-hidden />}
+            {photo ? "Change photo" : "Add photo"}
+          </button>
+        </div>
         <input
           ref={fileRef}
           type="file"
@@ -206,7 +208,7 @@ function HealthProfile({ animal }: { animal: Animal }) {
           {filled.map((r) => (
             <div key={r.label} className="grid grid-cols-[minmax(0,2fr)_minmax(0,3fr)] gap-3 py-2.5 text-sm">
               <dt className="text-muted">{r.label}</dt>
-              <dd className="font-medium">{r.value}</dd>
+              <dd className="min-w-0 break-words font-medium">{r.value}</dd>
             </div>
           ))}
         </dl>

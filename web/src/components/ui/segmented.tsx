@@ -17,7 +17,7 @@ export function Segmented<T extends string>({
   className?: string;
 }) {
   return (
-    <div role="radiogroup" aria-label={label} className={cn("scrollbar-none -mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1", className)}>
+    <div role="radiogroup" aria-label={label} className={cn("scrollbar-none flex min-w-0 max-w-full gap-1.5 overflow-x-auto px-0.5 py-0.5", className)}>
       {options.map((option) => {
         const selected = option.value === value;
         return (

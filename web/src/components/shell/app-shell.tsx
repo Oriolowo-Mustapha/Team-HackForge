@@ -89,26 +89,26 @@ export function AppShell({ children }: { children: ReactNode }) {
 
       <Sidebar user={user} pathname={pathname} items={nav.desktop} primary={nav.primaryAction} />
 
-      <div className="lg:pl-[276px]">
+      <div className="min-w-0 lg:pl-[276px]">
         <DemoBanner />
         <OfflineBanner />
 
         <header className="flex items-center gap-2 px-4 pb-1 pt-[max(12px,env(safe-area-inset-top))] sm:px-6 lg:hidden">
-          <Link href={homeFor(user.role)} aria-label="FarmHand home" className="rounded-xl">
+          <Link href={homeFor(user.role)} aria-label="FarmHand home" className="shrink-0 rounded-xl">
             <BrandMark className="size-10" />
           </Link>
           <div className="min-w-0 flex-1">
             {user.role === "Farmer" ? (
               <FarmSwitcher />
             ) : (
-              <div className="px-3">
+              <div className="min-w-0 px-3">
                 <p className="truncate text-[15px] font-semibold leading-tight">{user.role === "Vet" ? firstName(user.fullName, "Doctor") : "Administration"}</p>
-                <p className="text-xs font-medium text-muted">{user.role === "Vet" ? user.vetProfile?.specialization ?? "Veterinarian" : "FarmHand platform"}</p>
+                <p className="truncate text-xs font-medium text-muted">{user.role === "Vet" ? user.vetProfile?.specialization ?? "Veterinarian" : "FarmHand platform"}</p>
               </div>
             )}
           </div>
           <NotificationsButton user={user} />
-          <Link href="/profile" aria-label="Profile and settings" className="rounded-full">
+          <Link href="/profile" aria-label="Profile and settings" className="shrink-0 rounded-full">
             <Avatar name={user.fullName ?? user.email} className="size-11" tone={user.role === "Farmer" ? "beige" : "ink"} />
           </Link>
         </header>
@@ -118,7 +118,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           <NotificationsButton user={user} />
         </div>
 
-        <main id="main" className="mx-auto w-full max-w-[1180px] px-4 pb-[calc(112px+env(safe-area-inset-bottom))] pt-3 sm:px-6 lg:px-10 lg:pb-16 lg:pt-4">
+        <main id="main" className="mx-auto min-w-0 w-full max-w-[1180px] px-4 pb-[calc(112px+env(safe-area-inset-bottom))] pt-3 sm:px-6 lg:px-10 lg:pb-16 lg:pt-4">
           {forbidden ? (
             <EmptyState
               icon={<Lock />}
@@ -223,34 +223,34 @@ function BottomNav({ pathname, items }: { pathname: string; items: NavItem[] }) 
   return (
     <nav
       aria-label="Main"
-      className="fixed inset-x-3 bottom-[max(12px,env(safe-area-inset-bottom))] z-40 mx-auto max-w-[520px] rounded-[30px] bg-ink px-2 py-2 shadow-nav lg:hidden"
+      className="fixed left-[max(0.75rem,env(safe-area-inset-left))] right-[max(0.75rem,env(safe-area-inset-right))] bottom-[max(12px,env(safe-area-inset-bottom))] z-40 mx-auto max-w-[520px] rounded-[30px] bg-ink px-2 py-2 shadow-nav lg:hidden"
     >
-      <ul className="flex items-end justify-between">
+      <ul className="flex items-end justify-between gap-0.5">
         {items.map((item) => {
           const active = isActive(item, pathname);
           if (item.primary) {
             return (
-              <li key={item.href} className="flex flex-1 justify-center">
-                <Link href={item.href} aria-label="Report a health concern" className="group -mt-8 flex flex-col items-center gap-1">
-                  <span className="flex size-[60px] items-center justify-center rounded-full bg-terracotta text-white shadow-lift ring-[5px] ring-cream transition-transform group-active:scale-95">
-                    <item.icon className="size-7" aria-hidden />
+              <li key={item.href} className="flex min-w-0 flex-1 justify-center">
+                <Link href={item.href} aria-label="Report a health concern" className="group -mt-8 flex max-w-full flex-col items-center gap-1">
+                  <span className="flex size-[52px] items-center justify-center rounded-full bg-terracotta text-white shadow-lift ring-[4px] ring-cream transition-transform group-active:scale-95 min-[360px]:size-[60px] min-[360px]:ring-[5px]">
+                    <item.icon className="size-6 min-[360px]:size-7" aria-hidden />
                   </span>
-                  <span className="text-[11px] font-semibold text-cream">{item.label}</span>
+                  <span className="max-w-full truncate text-[11px] font-semibold text-cream">{item.label}</span>
                 </Link>
               </li>
             );
           }
           return (
-            <li key={item.href} className="flex flex-1 justify-center">
+            <li key={item.href} className="flex min-w-0 flex-1 justify-center">
               <Link
                 href={item.href}
                 aria-current={active ? "page" : undefined}
-                className={cn("flex min-w-[56px] flex-col items-center gap-1 rounded-2xl px-1 py-1 transition-colors", active ? "text-cream" : "text-cream/55 hover:text-cream")}
+                className={cn("flex w-full min-w-0 flex-col items-center gap-1 rounded-2xl px-0.5 py-1 transition-colors", active ? "text-cream" : "text-cream/55 hover:text-cream")}
               >
-                <span className={cn("flex h-8 w-12 items-center justify-center rounded-full transition-colors", active && "bg-terracotta text-white")}>
+                <span className={cn("flex h-8 w-full max-w-12 items-center justify-center rounded-full transition-colors", active && "bg-terracotta text-white")}>
                   <item.icon className="size-[20px]" aria-hidden />
                 </span>
-                <span className="text-[11px] font-semibold">{item.label}</span>
+                <span className="max-w-full truncate text-[11px] font-semibold">{item.label}</span>
               </Link>
             </li>
           );

@@ -68,7 +68,7 @@ export function GroupFormModal({
         <Field label="Name" error={errors.name}>
           <Input value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} placeholder="Layer House A" />
         </Field>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 gap-3 min-[360px]:grid-cols-2">
           <Field label="Species">
             <Select value={form.species} onChange={(e) => setForm((f) => ({ ...f, species: e.target.value }))}>
               <option value="">Choose…</option>

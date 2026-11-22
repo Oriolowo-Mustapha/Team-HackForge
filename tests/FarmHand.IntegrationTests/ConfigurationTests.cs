@@ -41,6 +41,17 @@ public class ConfigurationTests
     }
 
     [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData(" Disabled ")]
+    public void BlankOrPaddedFlutterwaveMode_NormalizesToDisabledAndPassesProductionValidation(string mode)
+    {
+        var values = Production();
+        values["Flutterwave:Mode"] = mode;
+        ConfigurationValidator.Validate(new ConfigurationBuilder().AddInMemoryCollection(values).Build(), true);
+    }
+
+    [Theory]
     [InlineData("Demo:Enabled", "true")]
     [InlineData("Ai:DemoFallback", "true")]
     [InlineData("Flutterwave:Mode", "Simulated")]

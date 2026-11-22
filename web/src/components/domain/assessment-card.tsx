@@ -37,7 +37,7 @@ export function AssessmentCard({
     <div className={cn("overflow-hidden rounded-[28px] bg-paper ring-1 ring-line/60", className)}>
       <div className={cn("flex items-center gap-3 px-5 py-4", panel[assessment.severity])}>
         <Icon className="size-7 shrink-0" aria-hidden />
-        <div>
+        <div className="min-w-0">
           <p className="text-xs font-semibold uppercase tracking-[0.08em] opacity-80">Suggested urgency</p>
           <p className="text-[22px] font-semibold leading-tight tracking-[-0.02em]">
             {meta.label} · {meta.description}

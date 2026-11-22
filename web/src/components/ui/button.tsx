@@ -17,13 +17,13 @@ const variants: Record<Variant, string> = {
 };
 
 const sizes: Record<Size, string> = {
-  sm: "h-10 px-4 text-sm gap-1.5 rounded-[14px]",
-  md: "h-12 px-5 text-[15px] gap-2 rounded-2xl",
-  lg: "h-14 px-6 text-base gap-2.5 rounded-[18px]",
+  sm: "min-h-10 px-4 py-2 text-sm gap-1.5 rounded-[14px]",
+  md: "min-h-12 px-5 py-2.5 text-[15px] gap-2 rounded-2xl",
+  lg: "min-h-14 px-6 py-3 text-base gap-2.5 rounded-[18px]",
 };
 
 const base =
-  "inline-flex items-center justify-center font-semibold tracking-[-0.01em] whitespace-nowrap transition-[background-color,transform,box-shadow] duration-150 active:scale-[0.985] disabled:pointer-events-none disabled:opacity-50 select-none";
+  "inline-flex max-w-full items-center justify-center text-center font-semibold leading-snug tracking-[-0.01em] transition-[background-color,transform,box-shadow] duration-150 active:scale-[0.985] disabled:pointer-events-none disabled:opacity-50 select-none [&_svg]:shrink-0";
 
 export function buttonClasses({ variant = "primary", size = "md", block = false, className }: { variant?: Variant; size?: Size; block?: boolean; className?: string } = {}) {
   return cn(base, variants[variant], sizes[size], block && "w-full", className);

@@ -19,7 +19,7 @@ export function FarmSwitcher({ inverse = false, className }: { inverse?: boolean
         type="button"
         onClick={() => setOpen(true)}
         className={cn(
-          "flex min-w-0 items-center gap-2 rounded-2xl px-3 py-2 text-left transition-colors",
+          "flex max-w-full min-w-0 items-center gap-2 rounded-2xl px-3 py-2 text-left transition-colors",
           inverse ? "bg-cream/8 text-cream hover:bg-cream/12" : "hover:bg-paper",
           className,
         )}

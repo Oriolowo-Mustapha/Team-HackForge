@@ -55,10 +55,10 @@ export function ReportDetail({ id, isNew }: { id: string; isNew: boolean }) {
         </Notice>
       )}
       <div className="grid gap-6 lg:grid-cols-12">
-        <div className="space-y-5 lg:col-span-5">
+        <div className="min-w-0 space-y-5 lg:col-span-5">
           <Evidence o={o} />
         </div>
-        <div className="space-y-5 lg:col-span-7">
+        <div className="min-w-0 space-y-5 lg:col-span-7">
           {result ? <ConfirmOutcome o={o} result={result} /> : pending ? <ReviewForm o={o} onConfirmed={setResult} /> : <ConfirmedSummary o={o} />}
         </div>
       </div>
@@ -112,33 +112,33 @@ function Evidence({ o }: { o: ObservationDetail }) {
                 Reported in {languageName(o.detectedLanguage)}
               </span>
             )}
-            <ListenButton text={o.rawTranscript} label="Listen" targetLanguage={o.detectedLanguage ?? undefined} className="mt-3" />
+            <ListenButton text={o.rawTranscript} label="Listen" targetLanguage={o.detectedLanguage ?? undefined} />
           </div>
         </Card>
       )}
       <Card>
         <CardTitle>Recorded</CardTitle>
         <dl className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
-          <div>
+          <div className="min-w-0">
             <dt className="text-muted">When</dt>
-            <dd className="font-semibold">{formatDateTime(o.recordedAt)}</dd>
+            <dd className="break-words font-semibold">{formatDateTime(o.recordedAt)}</dd>
           </div>
-          <div>
+          <div className="min-w-0">
             <dt className="text-muted">Sent as</dt>
-            <dd className="font-semibold capitalize">{o.inputChannels?.replace(/,/g, ", ") ?? "—"}</dd>
+            <dd className="break-words font-semibold capitalize">{o.inputChannels?.replace(/,/g, ", ") ?? "—"}</dd>
           </div>
-          <div>
+          <div className="min-w-0">
             <dt className="text-muted">About</dt>
-            <dd className="font-semibold">{o.subjectName ?? "—"}</dd>
+            <dd className="break-words font-semibold">{o.subjectName ?? "—"}</dd>
           </div>
-          <div>
+          <div className="min-w-0">
             <dt className="text-muted">Species</dt>
-            <dd className="font-semibold">{o.subjectSpecies ?? "—"}</dd>
+            <dd className="break-words font-semibold">{o.subjectSpecies ?? "—"}</dd>
           </div>
           {languageName(o.detectedLanguage) && (
-            <div>
+            <div className="min-w-0">
               <dt className="text-muted">Language</dt>
-              <dd className="font-semibold">{languageName(o.detectedLanguage)}</dd>
+              <dd className="break-words font-semibold">{languageName(o.detectedLanguage)}</dd>
             </div>
           )}
         </dl>
@@ -228,7 +228,7 @@ function ReviewForm({ o, onConfirmed }: { o: ObservationDetail; onConfirmed: (r:
           <Field label="Notes" hint="Correct anything that was misheard and add answers to the questions above.">
             <Textarea value={notes} onChange={(e) => setNotes(e.target.value.slice(0, 1000))} className="min-h-28" />
           </Field>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 min-[360px]:grid-cols-2">
             <Field label="Deaths">
               <Input inputMode="numeric" value={numbers.deaths} onChange={(e) => setNumbers((n) => ({ ...n, deaths: e.target.value.replace(/[^\d]/g, "").slice(0, 5) }))} />
             </Field>
@@ -387,9 +387,9 @@ function ConfirmedSummary({ o }: { o: ObservationDetail }) {
               ["Feed", o.feedConsumption],
               ["Water", o.waterConsumption],
             ].map(([k, v]) => (
-              <div key={k} className="rounded-2xl bg-sand px-3 py-2">
+              <div key={k} className="min-w-0 rounded-2xl bg-sand px-3 py-2">
                 <dt className="text-xs text-muted">{k}</dt>
-                <dd className="font-semibold">{v || "—"}</dd>
+                <dd className="break-words font-semibold">{v || "—"}</dd>
               </div>
             ))}
           </dl>
