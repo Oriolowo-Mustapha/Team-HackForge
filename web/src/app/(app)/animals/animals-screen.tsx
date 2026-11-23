@@ -139,7 +139,7 @@ export function AnimalsScreen() {
 
 function GroupCard({ group, onEdit }: { group: Group; onEdit: () => void }) {
   return (
-    <article className="overflow-hidden rounded-[28px] bg-paper ring-1 ring-line/60">
+    <article className="min-w-0 overflow-hidden rounded-[28px] bg-paper ring-1 ring-line/60">
       <div className="relative h-36">
         <Image src={smallPhoto(speciesPhoto(group.species, group.id))} alt="" fill sizes="(min-width: 1280px) 30vw, (min-width: 640px) 45vw, 100vw" className="object-cover" />
         <div className="absolute inset-0 bg-gradient-to-t from-ink/60 to-transparent" aria-hidden />
@@ -170,7 +170,7 @@ function GroupCard({ group, onEdit }: { group: Group; onEdit: () => void }) {
 function AnimalCard({ animal }: { animal: Animal }) {
   const photo = mediaUrl(animal.photoUrl);
   return (
-    <Link href={`/animals/${animal.id}`} className="group flex gap-4 rounded-[28px] bg-paper p-3 ring-1 ring-line/60 transition-colors hover:bg-white">
+    <Link href={`/animals/${animal.id}`} className="group flex min-w-0 gap-4 rounded-[28px] bg-paper p-3 ring-1 ring-line/60 transition-colors hover:bg-white">
       <span className="relative block size-24 shrink-0 overflow-hidden rounded-[20px] bg-sand">
         {photo ? (
           // eslint-disable-next-line @next/next/no-img-element -- uploaded photos are served through the authenticated BFF

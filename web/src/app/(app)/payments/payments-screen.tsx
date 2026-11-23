@@ -90,11 +90,11 @@ function PaymentRow({ payment }: { payment: Payment }) {
 
   if (payment.incidentId) {
     return (
-      <Link href={`/cases/${payment.incidentId}`} className="group flex items-center gap-3.5 rounded-[24px] bg-paper p-3 pr-4 ring-1 ring-line/60 transition-colors hover:bg-white">
+      <Link href={`/cases/${payment.incidentId}`} className="group flex min-w-0 items-center gap-3.5 rounded-[24px] bg-paper p-3 pr-4 ring-1 ring-line/60 transition-colors hover:bg-white">
         {inner}
         <ChevronRight className="size-4 shrink-0 text-faint transition-transform group-hover:translate-x-0.5" aria-hidden />
       </Link>
     );
   }
-  return <div className="flex items-center gap-3.5 rounded-[24px] bg-paper p-3 pr-4 ring-1 ring-line/60">{inner}</div>;
+  return <div className="flex min-w-0 items-center gap-3.5 rounded-[24px] bg-paper p-3 pr-4 ring-1 ring-line/60">{inner}</div>;
 }

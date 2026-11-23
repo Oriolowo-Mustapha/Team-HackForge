@@ -20,15 +20,16 @@ public static class ConfigurationValidator
         var mode = string.IsNullOrWhiteSpace(rawMode) ? "Disabled" : rawMode.Trim();
         if (!new[] { "Disabled", "Simulated", "Live" }.Contains(mode, StringComparer.OrdinalIgnoreCase))
             throw new InvalidOperationException("Flutterwave:Mode must be Disabled, Simulated, or Live.");
+        var rawPublicUrl = configuration["App:PublicUrl"]?.Trim();
         if (mode.Equals("Live", StringComparison.OrdinalIgnoreCase))
         {
             Require("Flutterwave:SecretKey");
             Require("Flutterwave:WebhookSecretHash");
-            if (!Uri.TryCreate(configuration["App:PublicUrl"], UriKind.Absolute, out var publicUrl) || publicUrl.Scheme != "https")
+            if (!Uri.TryCreate(rawPublicUrl, UriKind.Absolute, out var publicUrl) || publicUrl.Scheme != "https")
                 throw new InvalidOperationException("App:PublicUrl must be the HTTPS web application URL for live checkout returns.");
         }
         if (!production) return;
-        if (!Uri.TryCreate(configuration["App:PublicUrl"], UriKind.Absolute, out var webUrl) || webUrl.Scheme != "https")
+        if (!Uri.TryCreate(rawPublicUrl, UriKind.Absolute, out var webUrl) || webUrl.Scheme != "https")
             throw new InvalidOperationException("App:PublicUrl must be the HTTPS web application URL for password recovery.");
         Require("ConnectionStrings:DefaultConnection");
         Require("Jwt:SecretKey");

@@ -34,12 +34,12 @@ export function SubjectPicker({ farmId, value, onChange }: { farmId: string; val
   const option = (subject: Subject, photo: string, detail: string, uploaded?: string | null) => {
     const selected = value?.id === subject.id;
     return (
-      <li key={subject.id}>
+      <li key={subject.id} className="min-w-0">
         <button
           type="button"
           onClick={() => onChange(subject)}
           aria-pressed={selected}
-          className={cn("flex w-full items-center gap-3 rounded-[22px] p-2.5 pr-4 text-left ring-1 transition-colors", selected ? "bg-ink text-cream ring-ink" : "bg-paper ring-line/60 hover:bg-white")}
+          className={cn("flex w-full min-w-0 items-center gap-3 rounded-[22px] p-2.5 pr-4 text-left ring-1 transition-colors", selected ? "bg-ink text-cream ring-ink" : "bg-paper ring-line/60 hover:bg-white")}
         >
           <span className="relative block size-14 shrink-0 overflow-hidden rounded-[16px] bg-sand">
             {uploaded ? (
