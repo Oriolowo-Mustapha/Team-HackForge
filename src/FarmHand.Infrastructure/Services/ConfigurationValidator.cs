@@ -17,13 +17,11 @@ public static class ConfigurationValidator
             if (Placeholder(configuration[key])) throw new InvalidOperationException($"{key} must be configured with a real value.");
         }
         var rawMode = configuration["Flutterwave:Mode"];
-        // Treat missing or unrecognised values as Disabled to allow deployments without Flutterwave integration.
         var allowedModes = new[] { "Disabled", "Simulated", "Live" };
         var mode = string.IsNullOrWhiteSpace(rawMode) ? "Disabled" : rawMode.Trim();
         if (!allowedModes.Contains(mode, StringComparer.OrdinalIgnoreCase))
         {
-            // Log a warning (if a logger were available) and fallback to Disabled.
-            mode = "Disabled";
+            throw new InvalidOperationException("Flutterwave:Mode must be Disabled, Simulated, or Live.");
         }
         var rawPublicUrl = configuration["App:PublicUrl"]?.Trim();
         if (mode.Equals("Live", StringComparison.OrdinalIgnoreCase))
@@ -36,12 +34,7 @@ public static class ConfigurationValidator
         if (!production) return;
         if (!Uri.TryCreate(rawPublicUrl, UriKind.Absolute, out var webUrl) || webUrl.Scheme != "https")
             throw new InvalidOperationException("App:PublicUrl must be the HTTPS web application URL for password recovery.");
-        // Only require a DB connection string if one is supplied; otherwise skip the check to allow deployments without an immediate DB.
-        var connectionString = configuration["ConnectionStrings:DefaultConnection"];
-        if (!string.IsNullOrWhiteSpace(connectionString))
-        {
-            Require("ConnectionStrings:DefaultConnection");
-        }
+        Require("ConnectionStrings:DefaultConnection");
         Require("Jwt:SecretKey");
         if (Encoding.UTF8.GetByteCount(configuration["Jwt:SecretKey"]!) < 32)
             throw new InvalidOperationException("Jwt:SecretKey must contain at least 32 bytes.");
