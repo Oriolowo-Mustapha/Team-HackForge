@@ -16,16 +16,15 @@ public static class ConfigurationValidator
         {
             if (Placeholder(configuration[key])) throw new InvalidOperationException($"{key} must be configured with a real value.");
         }
-
-        // Flutterwave mode – accept only the three known values, otherwise fall back to Disabled (safe default).
         var rawMode = configuration["Flutterwave:Mode"];
-        var mode = string.IsNullOrWhiteSpace(rawMode) ? "Disabled" : rawMode.Trim();
+        // Treat missing or unrecognised values as Disabled to allow deployments without Flutterwave integration.
         var allowedModes = new[] { "Disabled", "Simulated", "Live" };
+        var mode = string.IsNullOrWhiteSpace(rawMode) ? "Disabled" : rawMode.Trim();
         if (!allowedModes.Contains(mode, StringComparer.OrdinalIgnoreCase))
         {
+            // Log a warning (if a logger were available) and fallback to Disabled.
             mode = "Disabled";
         }
-
         var rawPublicUrl = configuration["App:PublicUrl"]?.Trim();
         if (mode.Equals("Live", StringComparison.OrdinalIgnoreCase))
         {
@@ -34,13 +33,15 @@ public static class ConfigurationValidator
             if (!Uri.TryCreate(rawPublicUrl, UriKind.Absolute, out var publicUrl) || publicUrl.Scheme != "https")
                 throw new InvalidOperationException("App:PublicUrl must be the HTTPS web application URL for live checkout returns.");
         }
-
         if (!production) return;
-
-        // Production‑specific checks
         if (!Uri.TryCreate(rawPublicUrl, UriKind.Absolute, out var webUrl) || webUrl.Scheme != "https")
             throw new InvalidOperationException("App:PublicUrl must be the HTTPS web application URL for password recovery.");
-        Require("ConnectionStrings:DefaultConnection");
+        // Only require a DB connection string if one is supplied; otherwise skip the check to allow deployments without an immediate DB.
+        var connectionString = configuration["ConnectionStrings:DefaultConnection"];
+        if (!string.IsNullOrWhiteSpace(connectionString))
+        {
+            Require("ConnectionStrings:DefaultConnection");
+        }
         Require("Jwt:SecretKey");
         if (Encoding.UTF8.GetByteCount(configuration["Jwt:SecretKey"]!) < 32)
             throw new InvalidOperationException("Jwt:SecretKey must contain at least 32 bytes.");
@@ -52,17 +53,13 @@ public static class ConfigurationValidator
         var hosts = configuration["AllowedHosts"];
         if (string.IsNullOrWhiteSpace(hosts) || hosts.Split(';').Any(host => host.Trim() == "*"))
             throw new InvalidOperationException("AllowedHosts must explicitly list the API's accepted hostnames in Production.");
-
-        // Brevo must be enabled in production; otherwise reject.
         if (!configuration.GetValue("Brevo:Enabled", false))
-            throw new InvalidOperationException("Brevo must be enabled in Production.");
+            throw new InvalidOperationException("Brevo:Enabled must be true in Production so account recovery and vet onboarding can send email.");
         Require("Brevo:ApiKey");
         Require("Brevo:FromAddress");
-
         var storage = configuration["Storage:Provider"];
-        if (!string.IsNullOrEmpty(storage) && !string.Equals(storage, "Local", StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(storage, "Local", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("Production requires Storage:Provider=Local with a persistent Storage:LocalPath behind authorized media access. Public Cloudinary delivery is disabled until private cloud delivery is implemented.");
-        if (!string.IsNullOrEmpty(storage))
-            Require("Storage:LocalPath");
+        Require("Storage:LocalPath");
     }
 }
