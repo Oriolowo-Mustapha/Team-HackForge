@@ -267,13 +267,20 @@ if (migrateOnStartup)
     using var scope = app.Services.CreateScope();
     var dbContext = scope.ServiceProvider.GetRequiredService<FarmHandDbContext>();
 
-    await AdoptBaselineMigrationAsync(dbContext);
-    await dbContext.Database.MigrateAsync();
-
-    if (demoEnabled)
+    try
     {
-        var seeder = scope.ServiceProvider.GetRequiredService<IDemoDataSeeder>();
-        await seeder.SeedAsync();
+        await AdoptBaselineMigrationAsync(dbContext);
+        await dbContext.Database.MigrateAsync();
+
+        if (demoEnabled)
+        {
+            var seeder = scope.ServiceProvider.GetRequiredService<IDemoDataSeeder>();
+            await seeder.SeedAsync();
+        }
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning(ex, "Database migration/seed on startup encountered an error. Continuing startup.");
     }
 }
 
@@ -474,55 +481,62 @@ static async Task AdoptBaselineMigrationAsync(FarmHandDbContext dbContext)
     const string baselineMigrationId = "20261021213428_LivestockRestructure";
     const string productVersion = "9.0.0";
 
-    var creator = dbContext.Database.GetService<Microsoft.EntityFrameworkCore.Storage.IRelationalDatabaseCreator>();
-    if (!await creator.ExistsAsync())
-        return;
-
-    await dbContext.Database.OpenConnectionAsync();
     try
     {
-        var connection = dbContext.Database.GetDbConnection();
+        var creator = dbContext.Database.GetService<Microsoft.EntityFrameworkCore.Storage.IRelationalDatabaseCreator>();
+        if (!await creator.ExistsAsync())
+            return;
 
-        await using (var checkCommand = connection.CreateCommand())
+        await dbContext.Database.OpenConnectionAsync();
+        try
         {
-            checkCommand.CommandText = """
-                SELECT
-                    to_regclass('public."Farms"') IS NOT NULL AS "HasFarms",
-                    to_regclass('public."__EFMigrationsHistory"') IS NOT NULL AS "HasHistory"
-                """;
+            var connection = dbContext.Database.GetDbConnection();
 
-            await using var reader = await checkCommand.ExecuteReaderAsync();
-            if (!await reader.ReadAsync()) return;
-
-            var hasFarms = reader.GetBoolean(0);
-            var hasHistory = reader.GetBoolean(1);
-            if (!hasFarms) return;
-
-            await reader.CloseAsync();
-
-            if (!hasHistory)
+            await using (var checkCommand = connection.CreateCommand())
             {
-                await dbContext.Database.ExecuteSqlRawAsync("""
-                    CREATE TABLE "__EFMigrationsHistory" (
-                        "MigrationId" character varying(150) NOT NULL,
-                        "ProductVersion" character varying(32) NOT NULL,
-                        CONSTRAINT "PK___EFMigrationsHistory" PRIMARY KEY ("MigrationId")
+                checkCommand.CommandText = """
+                    SELECT
+                        to_regclass('public."Farms"') IS NOT NULL AS "HasFarms",
+                        to_regclass('public."__EFMigrationsHistory"') IS NOT NULL AS "HasHistory"
+                    """;
+
+                await using var reader = await checkCommand.ExecuteReaderAsync();
+                if (!await reader.ReadAsync()) return;
+
+                var hasFarms = reader.GetBoolean(0);
+                var hasHistory = reader.GetBoolean(1);
+                if (!hasFarms) return;
+
+                await reader.CloseAsync();
+
+                if (!hasHistory)
+                {
+                    await dbContext.Database.ExecuteSqlRawAsync("""
+                        CREATE TABLE "__EFMigrationsHistory" (
+                            "MigrationId" character varying(150) NOT NULL,
+                            "ProductVersion" character varying(32) NOT NULL,
+                            CONSTRAINT "PK___EFMigrationsHistory" PRIMARY KEY ("MigrationId")
+                        )
+                        """);
+                }
+
+                await dbContext.Database.ExecuteSqlRawAsync($"""
+                    INSERT INTO "__EFMigrationsHistory" ("MigrationId", "ProductVersion")
+                    SELECT '{baselineMigrationId}', '{productVersion}'
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM "__EFMigrationsHistory" WHERE "MigrationId" = '{baselineMigrationId}'
                     )
                     """);
             }
-
-            await dbContext.Database.ExecuteSqlRawAsync($"""
-                INSERT INTO "__EFMigrationsHistory" ("MigrationId", "ProductVersion")
-                SELECT '{baselineMigrationId}', '{productVersion}'
-                WHERE NOT EXISTS (
-                    SELECT 1 FROM "__EFMigrationsHistory" WHERE "MigrationId" = '{baselineMigrationId}'
-                )
-                """);
+        }
+        finally
+        {
+            await dbContext.Database.CloseConnectionAsync();
         }
     }
-    finally
+    catch (Exception)
     {
-        await dbContext.Database.CloseConnectionAsync();
+        // Suppress transient database connection errors during baseline adoption
     }
 }
 
