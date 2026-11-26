@@ -266,14 +266,26 @@ if (migrateOnStartup)
 {
     using var scope = app.Services.CreateScope();
     var dbContext = scope.ServiceProvider.GetRequiredService<FarmHandDbContext>();
+    var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
 
-    await AdoptBaselineMigrationAsync(dbContext);
-    await dbContext.Database.MigrateAsync();
-
-    if (demoEnabled)
+    for (int attempt = 1; attempt <= 5; attempt++)
     {
-        var seeder = scope.ServiceProvider.GetRequiredService<IDemoDataSeeder>();
-        await seeder.SeedAsync();
+        try
+        {
+            await AdoptBaselineMigrationAsync(dbContext);
+            await dbContext.Database.MigrateAsync();
+            if (demoEnabled)
+            {
+                var seeder = scope.ServiceProvider.GetRequiredService<IDemoDataSeeder>();
+                await seeder.SeedAsync();
+            }
+            break;
+        }
+        catch (Exception ex) when (attempt < 5 && (ex is Npgsql.NpgsqlException || ex is System.IO.EndOfStreamException || ex.InnerException is System.IO.EndOfStreamException))
+        {
+            logger.LogWarning(ex, "Database connection attempt {Attempt} failed. Retrying in {Seconds}s...", attempt, attempt * 2);
+            await Task.Delay(TimeSpan.FromSeconds(attempt * 2));
+        }
     }
 }
 

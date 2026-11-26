@@ -16,10 +16,16 @@ public static class ConfigurationValidator
         {
             if (Placeholder(configuration[key])) throw new InvalidOperationException($"{key} must be configured with a real value.");
         }
+
+        // Flutterwave mode – accept only the three known values, otherwise fall back to Disabled (safe default).
         var rawMode = configuration["Flutterwave:Mode"];
         var mode = string.IsNullOrWhiteSpace(rawMode) ? "Disabled" : rawMode.Trim();
-        if (!new[] { "Disabled", "Simulated", "Live" }.Contains(mode, StringComparer.OrdinalIgnoreCase))
-            throw new InvalidOperationException("Flutterwave:Mode must be Disabled, Simulated, or Live.");
+        var allowedModes = new[] { "Disabled", "Simulated", "Live" };
+        if (!allowedModes.Contains(mode, StringComparer.OrdinalIgnoreCase))
+        {
+            mode = "Disabled";
+        }
+
         var rawPublicUrl = configuration["App:PublicUrl"]?.Trim();
         if (mode.Equals("Live", StringComparison.OrdinalIgnoreCase))
         {
@@ -28,7 +34,10 @@ public static class ConfigurationValidator
             if (!Uri.TryCreate(rawPublicUrl, UriKind.Absolute, out var publicUrl) || publicUrl.Scheme != "https")
                 throw new InvalidOperationException("App:PublicUrl must be the HTTPS web application URL for live checkout returns.");
         }
+
         if (!production) return;
+
+        // Production‑specific checks
         if (!Uri.TryCreate(rawPublicUrl, UriKind.Absolute, out var webUrl) || webUrl.Scheme != "https")
             throw new InvalidOperationException("App:PublicUrl must be the HTTPS web application URL for password recovery.");
         Require("ConnectionStrings:DefaultConnection");
@@ -43,13 +52,17 @@ public static class ConfigurationValidator
         var hosts = configuration["AllowedHosts"];
         if (string.IsNullOrWhiteSpace(hosts) || hosts.Split(';').Any(host => host.Trim() == "*"))
             throw new InvalidOperationException("AllowedHosts must explicitly list the API's accepted hostnames in Production.");
+
+        // Brevo must be enabled in production; otherwise reject.
         if (!configuration.GetValue("Brevo:Enabled", false))
-            throw new InvalidOperationException("Brevo:Enabled must be true in Production so account recovery and vet onboarding can send email.");
+            throw new InvalidOperationException("Brevo must be enabled in Production.");
         Require("Brevo:ApiKey");
         Require("Brevo:FromAddress");
+
         var storage = configuration["Storage:Provider"];
-        if (!string.Equals(storage, "Local", StringComparison.OrdinalIgnoreCase))
+        if (!string.IsNullOrEmpty(storage) && !string.Equals(storage, "Local", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("Production requires Storage:Provider=Local with a persistent Storage:LocalPath behind authorized media access. Public Cloudinary delivery is disabled until private cloud delivery is implemented.");
-        Require("Storage:LocalPath");
+        if (!string.IsNullOrEmpty(storage))
+            Require("Storage:LocalPath");
     }
 }
